@@ -1,8 +1,13 @@
 import { getServerSupabase } from '@/lib/supabase/server';
+import { BaseRepository } from '@/shared/core';
 import { SiteSetting } from '@/types/entities';
 import { ISettingsRepository } from '@/types/repos';
 
-export class SupabaseSettingsRepository implements ISettingsRepository {
+export class SupabaseSettingsRepository extends BaseRepository<SiteSetting, string> implements ISettingsRepository {
+  constructor() {
+    super('SupabaseSettingsRepository');
+  }
+
   async getSettingByKey(key: string): Promise<SiteSetting | null> {
     const supabase = getServerSupabase();
     if (!supabase) return null;
@@ -19,6 +24,18 @@ export class SupabaseSettingsRepository implements ISettingsRepository {
       .update({ value })
       .eq('key', key);
     if (error) throw error;
+  }
+
+  async findById(id: string): Promise<SiteSetting | null> {
+    return this.getSettingByKey(id);
+  }
+
+  async save(entity: SiteSetting): Promise<void> {
+    await this.updateSetting(entity.key, entity.value);
+  }
+
+  async delete(_id: string): Promise<void> {
+    throw new Error('Delete is not supported for site settings');
   }
 }
 

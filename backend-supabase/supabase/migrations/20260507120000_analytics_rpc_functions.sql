@@ -224,7 +224,11 @@ returns table (
   page_views bigint,
   bandwidth_gb numeric,
   cache_hit_ratio_pct numeric,
-  storage_efficiency_pct numeric
+  storage_efficiency_pct numeric,
+  device_mobile bigint,
+  device_desktop bigint,
+  device_tablet bigint,
+  top_zones jsonb
 )
 language plpgsql
 stable
@@ -243,7 +247,11 @@ begin
     coalesce((metrics ->> 'page_views')::bigint, 0),
     coalesce((metrics ->> 'bandwidth_gb')::numeric, 0),
     coalesce((metrics ->> 'cache_hit_ratio_pct')::numeric, 0),
-    coalesce((metrics ->> 'storage_efficiency_pct')::numeric, 0)
+    coalesce((metrics ->> 'storage_efficiency_pct')::numeric, 0),
+    coalesce((metrics ->> 'device_mobile')::bigint, 0),
+    coalesce((metrics ->> 'device_desktop')::bigint, 0),
+    coalesce((metrics ->> 'device_tablet')::bigint, 0),
+    coalesce((metrics ->> 'top_zones')::jsonb, '[]'::jsonb)
   from public.analytics_snapshots
   where source = 'cloudflare'
     and range_key = target_range_key
@@ -251,7 +259,7 @@ begin
   limit 1;
 
   if not found then
-    return query select 0::numeric, 0::numeric, 0::bigint, 0::numeric, 0::bigint, 0::numeric, 0::bigint, 0::numeric, 0::numeric, 0::numeric;
+    return query select 0::numeric, 0::numeric, 0::bigint, 0::numeric, 0::bigint, 0::numeric, 0::bigint, 0::numeric, 0::numeric, 0::numeric, 0::bigint, 0::bigint, 0::bigint, '[]'::jsonb;
   end if;
 end;
 $$;

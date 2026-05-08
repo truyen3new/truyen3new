@@ -46,17 +46,25 @@ function SectionShell({
   title,
   description,
   icon,
+  tone = 'neutral',
   children,
 }: {
   title: string;
   description: string;
   icon: React.ReactNode;
+  tone?: 'neutral' | 'supabase' | 'cloudflare';
   children: React.ReactNode;
 }) {
+  const toneClasses = {
+    neutral: 'bg-slate-950 text-white dark:bg-slate-900',
+    supabase: 'bg-gradient-to-br from-emerald-600 to-teal-500 text-white',
+    cloudflare: 'bg-gradient-to-br from-orange-500 to-amber-400 text-white',
+  } as const;
+
   return (
     <section className="rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-[0_20px_60px_rgba(15,23,42,0.10)] overflow-hidden">
       <header className="flex items-start gap-4 border-b border-slate-100 dark:border-slate-800 px-6 py-5">
-        <div className="rounded-2xl bg-slate-950 text-white dark:bg-primary p-3">{icon}</div>
+        <div className={`rounded-2xl p-3 ${toneClasses[tone]}`}>{icon}</div>
         <div>
           <h2 className="text-xl font-black tracking-tight text-slate-950 dark:text-white">{title}</h2>
           <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">{description}</p>
@@ -97,6 +105,8 @@ function UserEngagementCard({ data }: { data: UserEngagementMetrics }) {
           <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Estimated from user view windows in the selected period.</p>
         </div>
       </div>
+
+      
     </div>
   );
 }
@@ -167,6 +177,41 @@ function InfrastructureCard({ data }: { data: InfrastructureMetrics }) {
           <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Average query latency for backend reads and writes.</p>
         </div>
       </div>
+
+      <div className="rounded-3xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-950 p-5">
+        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Cloudflare Device Breakdown</p>
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <p className="text-sm font-black text-slate-900 dark:text-white">Mobile</p>
+            <p className="text-2xl font-bold text-slate-700 dark:text-slate-200">{formatCompactNumber(data.device_mobile || 0)}</p>
+          </div>
+          <div>
+            <p className="text-sm font-black text-slate-900 dark:text-white">Desktop</p>
+            <p className="text-2xl font-bold text-slate-700 dark:text-slate-200">{formatCompactNumber(data.device_desktop || 0)}</p>
+          </div>
+          <div>
+            <p className="text-sm font-black text-slate-900 dark:text-white">Tablet</p>
+            <p className="text-2xl font-bold text-slate-700 dark:text-slate-200">{formatCompactNumber(data.device_tablet || 0)}</p>
+          </div>
+        </div>
+      </div>
+
+      {data.top_zones && data.top_zones.length > 0 && (
+        <div className="rounded-3xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-950 p-5">
+          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Cloudflare Top Zones</p>
+          <div className="mt-3 space-y-3">
+            {data.top_zones.slice(0, 5).map((zone) => (
+              <div key={zone.zone} className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-semibold text-slate-800 dark:text-white">{zone.zone}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Cache hit {formatFixedNumber(zone.cache_hit_ratio_pct || 0)}%</p>
+                </div>
+                <div className="text-sm font-black text-slate-700 dark:text-slate-200">{formatCompactNumber(zone.requests)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -260,23 +305,23 @@ export const AnalyticsDashboardTab: React.FC<AnalyticsDashboardTabProps> = ({ ro
 
       {dashboardQuery.data && (
         <>
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-            <SectionShell title="User Engagement" description="Supabase-derived readership and retention signals." icon={<ShieldCheck size={18} />}>
+          <div className="grid grid-cols-1 gap-6">
+            <SectionShell tone="supabase" title="Supabase Engagement" description="Supabase-derived readership and retention signals." icon={<ShieldCheck size={18} />}>
               <UserEngagementCard data={dashboardQuery.data.user_engagement} />
             </SectionShell>
 
-            <SectionShell title="Content Performance" description="Chapter rankings and reading momentum across the selected window." icon={<TrendingUp size={18} />}>
+            <SectionShell tone="supabase" title="Supabase Content Performance" description="Chapter rankings and reading momentum from Supabase." icon={<TrendingUp size={18} />}>
               <ContentPerformanceCard data={dashboardQuery.data.content_performance} />
             </SectionShell>
 
-            <SectionShell title="Infrastructure" description={isAdmin ? 'Cloudflare delivery and database telemetry.' : 'Restricted view of public delivery health.'} icon={<Cloud size={18} />}>
+            <SectionShell tone="cloudflare" title="Cloudflare Infrastructure" description={isAdmin ? 'Cloudflare delivery, caching, device, and zone telemetry.' : 'Restricted view of public delivery health.'} icon={<Cloud size={18} />}>
               <InfrastructureCard data={dashboardQuery.data.infrastructure} />
             </SectionShell>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <MetricCard
-              title="Dashboard Health"
+              title="Supabase + Cloudflare Health"
               value={dashboardQuery.data.meta.source_health.cloudflare === 'ready' ? 'Healthy' : dashboardQuery.data.meta.source_health.cloudflare === 'degraded' ? 'Partial' : 'Offline'}
               detail={`Supabase ${dashboardQuery.data.meta.source_health.supabase}, Cloudflare ${dashboardQuery.data.meta.source_health.cloudflare}`}
               accent="bg-gradient-to-br from-emerald-500 to-teal-400"

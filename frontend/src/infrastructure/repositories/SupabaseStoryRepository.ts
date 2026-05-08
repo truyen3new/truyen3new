@@ -95,7 +95,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async updateStory(id: string, payload: Pick<Story, 'title' | 'description' | 'status'>): Promise<Story> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', id, payload }) });
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', id, payload }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);
@@ -103,21 +103,21 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async deleteStory(id: string): Promise<void> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) });
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);
   }
 
   async bulkUpdateStatus(ids: string[], status: Story['status']): Promise<void> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulkUpdateStatus', ids, status }) });
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulkUpdateStatus', ids, status }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);
   }
 
   async bulkDeleteStories(ids: string[]): Promise<void> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulkDelete', ids }) });
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulkDelete', ids }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);

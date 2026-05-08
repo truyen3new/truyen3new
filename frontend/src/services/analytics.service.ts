@@ -1,15 +1,11 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   AnalyticsDashboardResponse,
   AnalyticsRole,
   AnalyticsTimeRange,
   ContentPerformanceMetrics,
   InfrastructureMetrics,
-  TopChapterMetric,
   UserEngagementMetrics,
 } from '@/types/analytics';
-
-type RpcRow = Record<string, unknown>;
 
 type WorkerInfrastructurePayload = Partial<InfrastructureMetrics> & {
   recorded_at?: string;
@@ -31,6 +27,10 @@ const DEFAULT_INFRASTRUCTURE: InfrastructureMetrics = {
   bandwidth_gb: 0,
   cache_hit_ratio_pct: 0,
   storage_efficiency_pct: 0,
+  device_mobile: 0,
+  device_desktop: 0,
+  device_tablet: 0,
+  top_zones: [],
 };
 
 const TIME_RANGE_TO_INTERVAL: Record<AnalyticsTimeRange, string> = {
@@ -96,19 +96,9 @@ function toNumber(value: unknown, fallback = 0): number {
   return fallback;
 }
 
-function toString(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback;
-}
-
 function round(value: number, precision = 2): number {
   const factor = 10 ** precision;
   return Math.round(value * factor) / factor;
-}
-
-function unwrapSingleRow<T extends RpcRow>(value: T | T[] | null | undefined): T | null {
-  if (!value) return null;
-  if (Array.isArray(value)) return (value[0] as T | undefined) ?? null;
-  return value;
 }
 
 function computeGrowthRate(current: number, previous: number): number {
@@ -119,24 +109,6 @@ function computeGrowthRate(current: number, previous: number): number {
 function computeEfficiency(usedGb: number, allocatedGb: number): number {
   if (allocatedGb <= 0) return 0;
   return round((usedGb / allocatedGb) * 100);
-}
-
-function sanitizeTopChapters(value: unknown): TopChapterMetric[] {
-  if (!Array.isArray(value)) return [];
-
-  return value.map((item) => {
-    const row = item as Record<string, unknown>;
-    return {
-      chapter_id: toString(row.chapter_id, crypto.randomUUID()),
-      story_id: toString(row.story_id),
-      title: toString(row.title, 'Untitled chapter'),
-      chapter_number: Math.max(1, Math.trunc(toNumber(row.chapter_number, 1))),
-      views: Math.max(0, Math.trunc(toNumber(row.views))),
-      favorites: Math.max(0, Math.trunc(toNumber(row.favorites))),
-      engagement_score: round(toNumber(row.engagement_score)),
-      growth_rate_pct: round(toNumber(row.growth_rate_pct)),
-    };
-  });
 }
 
 async function fetchWorkerAnalytics(range: AnalyticsTimeRange, role: AnalyticsRole): Promise<WorkerAnalyticsPayload | null> {
@@ -181,6 +153,10 @@ function normalizeInfrastructure(metrics: Partial<InfrastructureMetrics> | null 
     bandwidth_gb: round(toNumber(metrics.bandwidth_gb)),
     cache_hit_ratio_pct: round(toNumber(metrics.cache_hit_ratio_pct)),
     storage_efficiency_pct: round(toNumber(metrics.storage_efficiency_pct)),
+    device_mobile: Math.max(0, Math.trunc(toNumber((metrics as any).device_mobile))),
+    device_desktop: Math.max(0, Math.trunc(toNumber((metrics as any).device_desktop))),
+    device_tablet: Math.max(0, Math.trunc(toNumber((metrics as any).device_tablet))),
+    top_zones: Array.isArray((metrics as any).top_zones) ? ((metrics as any).top_zones as any[]) : [],
   };
 
   if (next.storage_efficiency_pct === 0 && next.r2_allocated_gb > 0) {
@@ -190,89 +166,14 @@ function normalizeInfrastructure(metrics: Partial<InfrastructureMetrics> | null 
   return next;
 }
 
-async function fetchLatestStorageSnapshot(
-  supabase: SupabaseClient,
-  range: AnalyticsTimeRange,
-): Promise<InfrastructureMetrics | null> {
-  const { data, error } = await supabase
-    .from('analytics_snapshots')
-    .select('metrics')
-    .eq('range_key', range)
-    .eq('source', 'cloudflare')
-    .order('recorded_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return normalizeInfrastructure(data.metrics as Partial<InfrastructureMetrics> | null | undefined);
-}
-
-async function saveStorageSnapshot(
-  supabase: SupabaseClient,
-  range: AnalyticsTimeRange,
-  metrics: InfrastructureMetrics,
-): Promise<void> {
-  try {
-    await supabase.from('analytics_snapshots').insert({
-      source: 'cloudflare',
-      range_key: range,
-      metrics,
-    });
-  } catch {
-    // Best-effort cache only.
-  }
-}
-
-async function fetchUserEngagement(
-  supabase: SupabaseClient,
-  range: AnalyticsTimeRange,
-): Promise<UserEngagementMetrics> {
-  const { data, error } = await supabase
-    .rpc('get_user_engagement_metrics', {
-      p_time_range: analyticsTimeRangeToInterval(range),
-    })
-    .single();
-
-  if (error || !data) return createEmptyUserEngagement();
-
-  const row = unwrapSingleRow(data as RpcRow | RpcRow[] | null);
-  if (!row) return createEmptyUserEngagement();
-
+async function fetchReadOnlySupabaseMetrics(): Promise<{
+  userEngagement: UserEngagementMetrics;
+  contentPerformance: ContentPerformanceMetrics;
+}> {
+  // Dashboard must not depend on Supabase DB access. Keep the shapes stable, but return empty metrics.
   return {
-    total_users: Math.max(0, Math.trunc(toNumber(row.total_users))),
-    new_users: Math.max(0, Math.trunc(toNumber(row.new_users))),
-    active_users: Math.max(0, Math.trunc(toNumber(row.active_users))),
-    total_views: Math.max(0, Math.trunc(toNumber(row.total_views))),
-    total_favorites: Math.max(0, Math.trunc(toNumber(row.total_favorites))),
-    growth_rate_pct: round(toNumber(row.growth_rate_pct)),
-    churn_rate_pct: round(toNumber(row.churn_rate_pct)),
-    avg_session_duration_minutes: round(toNumber(row.avg_session_duration_minutes)),
-  };
-}
-
-async function fetchContentPerformance(
-  supabase: SupabaseClient,
-  range: AnalyticsTimeRange,
-  limit: number,
-): Promise<ContentPerformanceMetrics> {
-  const { data, error } = await supabase
-    .rpc('get_content_performance', {
-      p_time_range: analyticsTimeRangeToInterval(range),
-      p_limit: limit,
-    })
-    .single();
-
-  if (error || !data) return createEmptyContentPerformance();
-
-  const row = unwrapSingleRow(data as RpcRow | RpcRow[] | null);
-  if (!row) return createEmptyContentPerformance();
-
-  return {
-    total_views: Math.max(0, Math.trunc(toNumber(row.total_views))),
-    total_favorites: Math.max(0, Math.trunc(toNumber(row.total_favorites))),
-    avg_views_per_chapter: round(toNumber(row.avg_views_per_chapter)),
-    engagement_score: round(toNumber(row.engagement_score)),
-    top_chapters: sanitizeTopChapters(row.top_chapters),
+    userEngagement: createEmptyUserEngagement(),
+    contentPerformance: createEmptyContentPerformance(),
   };
 }
 
@@ -309,37 +210,28 @@ function applyRoleRestrictions(
 }
 
 export async function getAnalyticsDashboardData(params: {
-  supabase: SupabaseClient;
+  supabase?: unknown;
   range: AnalyticsTimeRange;
   role: AnalyticsRole;
 }): Promise<AnalyticsDashboardResponse> {
-  const { supabase, range, role } = params;
+  const { range, role } = params;
   const now = new Date();
   const workerResult = await fetchWorkerAnalytics(range, role);
 
-  const [userEngagement, contentPerformance, cachedInfrastructure] = await Promise.all([
-    fetchUserEngagement(supabase, range),
-    fetchContentPerformance(supabase, range, TIME_RANGE_TO_LIMIT[range]),
-    fetchLatestStorageSnapshot(supabase, range),
-  ]);
-
-  const infrastructure = normalizeInfrastructure(workerResult?.infrastructure ?? cachedInfrastructure ?? DEFAULT_INFRASTRUCTURE);
+  const { userEngagement, contentPerformance } = await fetchReadOnlySupabaseMetrics();
+  const infrastructure = normalizeInfrastructure(workerResult?.infrastructure ?? DEFAULT_INFRASTRUCTURE);
   const restricted = applyRoleRestrictions(role, userEngagement, contentPerformance, infrastructure);
-
-  if (workerResult?.infrastructure) {
-    void saveStorageSnapshot(supabase, range, infrastructure);
-  }
 
   return {
     meta: {
       timestamp: now.toISOString(),
       range,
       role,
-      cached: !!cachedInfrastructure,
+      cached: false,
       restricted: restricted.restricted,
       source_health: {
-        supabase: 'ready',
-        cloudflare: workerResult?.infrastructure ? 'ready' : cachedInfrastructure ? 'degraded' : 'unavailable',
+        supabase: 'unavailable',
+        cloudflare: workerResult?.infrastructure ? 'ready' : 'degraded',
       },
       time_window: {
         start: new Date(now.getTime() - TIME_RANGE_DAYS[range] * 24 * 60 * 60 * 1000).toISOString(),

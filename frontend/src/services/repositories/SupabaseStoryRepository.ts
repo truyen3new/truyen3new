@@ -60,6 +60,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
   async saveStory(story: Partial<Story>): Promise<Story> {
     const res = await fetch("/api/internal/admin/manage-story", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ story }),
     });
@@ -120,6 +121,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
   ): Promise<Story> {
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "update", id, payload }),
     });
@@ -132,6 +134,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
   async deleteStory(id: string): Promise<void> {
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "delete", id }),
     });
@@ -142,6 +145,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
     if (ids.length === 0) return;
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "bulkUpdateStatus", ids, status }),
     });
@@ -152,6 +156,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
     if (ids.length === 0) return;
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "bulkDelete", ids }),
     });

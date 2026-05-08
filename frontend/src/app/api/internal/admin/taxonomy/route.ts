@@ -14,11 +14,20 @@ async function getRequester(request: NextRequest) {
     const userId = userData.user?.id;
     if (userError || !userId) return { ok: false };
 
+    // Try profiles table first
     const supabase = getServerSupabase();
-    if (!supabase) return { ok: false };
-    const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).single();
-    if (!data) return { ok: false };
-    return { ok: true, id: userId, role: data.role };
+    if (supabase) {
+      const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).single();
+      if (data?.role) return { ok: true, id: userId, role: data.role };
+    }
+
+    // Fall back to app_metadata.role or user_metadata.role
+    const metadataRole = userData.user?.app_metadata?.role ?? userData.user?.user_metadata?.role;
+    if (typeof metadataRole === 'string' && metadataRole.trim()) {
+      return { ok: true, id: userId, role: metadataRole.trim() };
+    }
+
+    return { ok: false };
   } catch {
     return { ok: false };
   }

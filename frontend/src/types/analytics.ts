@@ -64,6 +64,10 @@ export interface InfrastructureMetrics {
   bandwidth_gb: number;
   cache_hit_ratio_pct: number;
   storage_efficiency_pct: number;
+  device_mobile?: number;
+  device_desktop?: number;
+  device_tablet?: number;
+  top_zones?: Array<{ zone: string; requests: number; cache_hit_ratio_pct?: number }>;
 }
 
 export interface AnalyticsTrendPoint {
