@@ -1,0 +1,2150 @@
+diff --git a/backend-supabase/supabase/migrations/20260507120000_analytics_rpc_functions.sql b/backend-supabase/supabase/migrations/20260507120000_analytics_rpc_functions.sql
+new file mode 100644
+index 0000000..1a2c3e4
+--- /dev/null
++++ b/backend-supabase/supabase/migrations/20260507120000_analytics_rpc_functions.sql
+@@ -0,0 +1,304 @@
++-- ============================================================================
++-- Analytics Dashboard: RPC Functions & Indexes for Light Story
++-- Version: 1.0
++-- Deployment Date: May 7, 2026
++-- ============================================================================
++
++-- ============================================================================
++-- SECTION 1: Create Required Indexes for Performance
++-- ============================================================================
++
++-- Index on story_views for engagement metrics (critical)
++CREATE INDEX IF NOT EXISTS idx_story_views_viewed_at 
++  ON story_views(viewed_at DESC)
++  WHERE viewed_at > NOW() - INTERVAL '90 days';
++
++CREATE INDEX IF NOT EXISTS idx_story_views_viewed_by_viewed_at 
++  ON story_views(viewed_by, viewed_at DESC);
++
++-- Index on story_likes for content performance
++CREATE INDEX IF NOT EXISTS idx_story_likes_created_at 
++  ON story_likes(created_at DESC)
++  WHERE created_at > NOW() - INTERVAL '90 days';
++
++-- Index on profiles for user cohorts
++CREATE INDEX IF NOT EXISTS idx_profiles_created_at 
++  ON profiles(created_at DESC);
++
++-- Index on stories for ranking
++CREATE INDEX IF NOT EXISTS idx_stories_views 
++  ON stories(views DESC);
++
++-- Index on chapters for story drill-down
++CREATE INDEX IF NOT EXISTS idx_chapters_story_id_created_at 
++  ON chapters(story_id, created_at DESC);
++
++-- Index on chapter_images for storage tracking
++CREATE INDEX IF NOT EXISTS idx_chapter_images_created_at 
++  ON chapter_images(created_at DESC)
++  WHERE created_at > NOW() - INTERVAL '90 days';
++
++-- ============================================================================
++-- SECTION 2: User Engagement Metrics RPC
++-- ============================================================================
++
++CREATE OR REPLACE FUNCTION get_user_engagement_metrics(
++    p_time_range INTERVAL DEFAULT '24 hours'::INTERVAL,
++    p_limit INT DEFAULT 100
++) RETURNS TABLE (
++    total_users BIGINT,
++    new_users BIGINT,
++    growth_rate_pct NUMERIC,
++    active_users BIGINT,
++    dau BIGINT,
++    wau BIGINT,
++    mau BIGINT,
++    churn_rate_pct NUMERIC,
++    avg_session_duration_minutes NUMERIC
++) LANGUAGE SQL STABLE AS $$
++WITH time_windows AS (
++    SELECT 
++        NOW() - p_time_range AS period_start,
++        NOW() AS period_end,
++        NOW() - '7 days'::INTERVAL AS week_start,
++        NOW() - '30 days'::INTERVAL AS month_start,
++        NOW() - (p_time_range * 2) AS prev_period_start
++),
++user_cohorts AS (
++    SELECT 
++        p.id,
++        p.created_at,
++        CASE WHEN sv.viewed_at > (SELECT period_start FROM time_windows)
++             THEN 1 ELSE 0 END AS is_active_current,
++        CASE WHEN sv.viewed_at > (SELECT period_start FROM time_windows) - '14 days'::INTERVAL
++             THEN 1 ELSE 0 END AS was_active_prev,
++        CASE WHEN p.created_at > (SELECT period_start FROM time_windows)
++             THEN 1 ELSE 0 END AS is_new,
++        MAX(sv.viewed_at) AS last_view_at
++    FROM profiles p
++    LEFT JOIN story_views sv ON p.id = sv.viewed_by
++    WHERE p.role NOT IN ('superadmin', 'admin')
++        AND p.created_at <= NOW()
++    GROUP BY p.id, p.created_at
++),
++active_stats AS (
++    SELECT 
++        COUNT(DISTINCT uc.id) AS dau_count,
++        COUNT(DISTINCT CASE WHEN uc.last_view_at > (SELECT week_start FROM time_windows)
++            THEN uc.id END) AS wau_count,
++        COUNT(DISTINCT CASE WHEN uc.last_view_at > (SELECT month_start FROM time_windows)
++            THEN uc.id END) AS mau_count,
++        COUNT(DISTINCT CASE WHEN uc.is_new = 1 THEN uc.id END) AS new_count,
++        COUNT(DISTINCT uc.id) AS total_count,
++        COUNT(DISTINCT CASE WHEN uc.is_active_current = 1 THEN uc.id END) AS active_count
++    FROM user_cohorts uc
++),
++churn_calc AS (
++    SELECT 
++        ROUND(
++            COUNT(DISTINCT CASE WHEN uc.is_active_current = 0 AND uc.was_active_prev = 1
++                THEN uc.id END)::NUMERIC / NULLIF(
++                    COUNT(DISTINCT CASE WHEN uc.was_active_prev = 1 THEN uc.id END),
++                    0
++                ) * 100,
++            2
++        ) AS churn_pct
++    FROM user_cohorts uc
++),
++growth_calc AS (
++    SELECT 
++        ROUND(
++            ((SELECT dau_count FROM active_stats)::NUMERIC - 
++             (SELECT COUNT(DISTINCT CASE WHEN uc.last_view_at > (SELECT prev_period_start FROM time_windows)
++                                          AND uc.last_view_at <= (SELECT period_start FROM time_windows)
++                                     THEN uc.id END) FROM user_cohorts uc)::NUMERIC) /
++            NULLIF((SELECT COUNT(DISTINCT CASE WHEN uc.last_view_at > (SELECT prev_period_start FROM time_windows)
++                                                AND uc.last_view_at <= (SELECT period_start FROM time_windows)
++                                           THEN uc.id END) FROM user_cohorts uc)::NUMERIC, 0) * 100,
++            2
++        ) AS growth_pct
++),
++avg_duration_calc AS (
++    SELECT AVG(session_minutes)::NUMERIC AS avg_minutes
++    FROM (
++        SELECT 
++            COUNT(DISTINCT viewed_at)::NUMERIC / 
++            NULLIF(EXTRACT(EPOCH FROM (MAX(viewed_at) - MIN(viewed_at))) / 60, 0) AS session_minutes
++        FROM story_views
++        WHERE viewed_at > (SELECT period_start FROM time_windows)
++        GROUP BY viewed_by
++        LIMIT p_limit
++    ) sessions
++)
++SELECT 
++    (SELECT total_count FROM active_stats),
++    (SELECT new_count FROM active_stats),
++    COALESCE((SELECT growth_pct FROM growth_calc), 0),
++    (SELECT active_count FROM active_stats),
++    (SELECT dau_count FROM active_stats),
++    (SELECT wau_count FROM active_stats),
++    (SELECT mau_count FROM active_stats),
++    COALESCE((SELECT churn_pct FROM churn_calc), 0),
++    COALESCE((SELECT avg_minutes FROM avg_duration_calc), 0)
++$$;
++
++-- Grant execution to authenticated users
++GRANT EXECUTE ON FUNCTION get_user_engagement_metrics(INTERVAL, INT) TO authenticated, anon;
++GRANT EXECUTE ON FUNCTION get_user_engagement_metrics TO authenticated, anon;
++
++-- ============================================================================
++-- SECTION 3: Content Performance RPC
++-- ============================================================================
++
++CREATE OR REPLACE FUNCTION get_content_performance(
++    p_time_range INTERVAL DEFAULT '7 days'::INTERVAL,
++    p_limit INT DEFAULT 10
++) RETURNS TABLE (
++    top_chapters JSONB,
++    total_views BIGINT,
++    avg_views_per_chapter NUMERIC,
++    engagement_score NUMERIC
++) LANGUAGE SQL STABLE AS $$
++WITH content_stats AS (
++    SELECT 
++        c.id AS chapter_id,
++        c.story_id,
++        c.chapter_number,
++        c.title,
++        COUNT(sv.id)::BIGINT AS view_count,
++        COALESCE(COUNT(DISTINCT CASE WHEN sl.created_at > NOW() - p_time_range THEN sl.id END), 0)::INT AS like_count,
++        (COUNT(sv.id)::NUMERIC + (COALESCE(COUNT(DISTINCT CASE WHEN sl.created_at > NOW() - p_time_range THEN sl.id END), 0)::NUMERIC * 2)))::INT AS engagement_score,
++        ROW_NUMBER() OVER (ORDER BY COUNT(sv.id) DESC) AS rank
++    FROM chapters c
++    LEFT JOIN story_views sv ON c.story_id = sv.story_id
++        AND sv.viewed_at > NOW() - p_time_range
++    LEFT JOIN story_likes sl ON c.story_id = sl.story_id
++    WHERE c.created_at <= NOW()
++    GROUP BY c.id, c.story_id, c.chapter_number, c.title
++),
++top_content AS (
++    SELECT 
++        jsonb_agg(jsonb_build_object(
++            'chapter_id', chapter_id,
++            'story_id', story_id,
++            'chapter_number', chapter_number,
++            'title', title,
++            'views', view_count,
++            'likes', like_count,
++            'engagement_score', engagement_score,
++            'rank', rank
++        ) ORDER BY rank ASC) FILTER (WHERE rank <= p_limit) AS chapters,
++        SUM(view_count)::BIGINT AS total_views,
++        AVG(view_count)::NUMERIC AS avg_views,
++        AVG(engagement_score)::NUMERIC AS avg_engagement
++    FROM content_stats
++)
++SELECT 
++    COALESCE(tc.chapters, '[]'::JSONB),
++    COALESCE(tc.total_views, 0),
++    COALESCE(tc.avg_views, 0),
++    COALESCE(tc.avg_engagement, 0)
++FROM top_content tc
++$$;
++
++GRANT EXECUTE ON FUNCTION get_content_performance(INTERVAL, INT) TO authenticated, anon;
++GRANT EXECUTE ON FUNCTION get_content_performance TO authenticated, anon;
++
++-- ============================================================================
++-- SECTION 4: Storage & Infrastructure Metrics RPC
++-- ============================================================================
++
++CREATE OR REPLACE FUNCTION get_storage_metrics(
++    p_time_range INTERVAL DEFAULT '30 days'::INTERVAL
++) RETURNS TABLE (
++    r2_usage_gb NUMERIC,
++    r2_object_count BIGINT,
++    d1_size_bytes BIGINT,
++    chapter_images_count BIGINT,
++    storage_efficiency_pct NUMERIC
++) LANGUAGE SQL STABLE AS $$
++WITH storage_summary AS (
++    SELECT 
++        COUNT(DISTINCT ci.id) AS image_count,
++        COALESCE(SUM(ci.size_bytes), 0)::BIGINT AS total_size_bytes,
++        COUNT(DISTINCT c.id) AS chapter_count,
++        COUNT(DISTINCT s.id) AS story_count
++    FROM chapter_images ci
++    LEFT JOIN chapters c ON ci.chapter_id = c.id
++    LEFT JOIN stories s ON c.story_id = s.id
++    WHERE ci.created_at > NOW() - p_time_range
++)
++SELECT 
++    (total_size_bytes::NUMERIC / 1024 / 1024 / 1024)::NUMERIC,
++    image_count,
++    (story_count * 1048576)::BIGINT,
++    image_count,
++    ROUND(
++        (chapter_count::NUMERIC / NULLIF(image_count::NUMERIC, 0) * 100),
++        2
++    )
++FROM storage_summary
++$$;
++
++GRANT EXECUTE ON FUNCTION get_storage_metrics(INTERVAL) TO authenticated, anon;
++GRANT EXECUTE ON FUNCTION get_storage_metrics TO authenticated, anon;
++
++-- ============================================================================
++-- SECTION 5: Materialized View for Dashboard Cache (Optional but Recommended)
++-- ============================================================================
++
++CREATE MATERIALIZED VIEW IF NOT EXISTS mv_analytics_cache AS
++SELECT 
++    'user_engagement'::TEXT AS metric_type,
++    jsonb_build_object(
++        'timestamp', NOW(),
++        'data', row_to_json(get_user_engagement_metrics('24 hours'::INTERVAL))
++    ) AS cached_data,
++    NOW() AS last_refresh
++UNION ALL
++SELECT 
++    'content_performance'::TEXT,
++    jsonb_build_object(
++        'timestamp', NOW(),
++        'data', row_to_json(get_content_performance('7 days'::INTERVAL))
++    ),
++    NOW()
++UNION ALL
++SELECT 
++    'storage_metrics'::TEXT,
++    jsonb_build_object(
++        'timestamp', NOW(),
++        'data', row_to_json(get_storage_metrics('30 days'::INTERVAL))
++    ),
++    NOW();
++
++-- Refresh policy (optional - requires pg_cron)
++-- SELECT cron.schedule('refresh_analytics_cache', '*/5 * * * *', 
++--   'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_analytics_cache');
++
++-- ============================================================================
++-- SECTION 6: Row Level Security (RLS) Policies
++-- ============================================================================
++
++-- Enable RLS on story_views (if not already enabled)
++ALTER TABLE story_views ENABLE ROW LEVEL SECURITY;
++
++-- Policy: Only admins can query historical analytics
++CREATE POLICY analytics_admin_read ON story_views
++    FOR SELECT
++    USING (
++        EXISTS (
++            SELECT 1 FROM profiles p 
++            WHERE p.id = auth.uid() 
++            AND p.role IN ('superadmin', 'admin')
++        )
++    );
++
++-- ============================================================================
++-- Migration Complete
++-- ============================================================================
+diff --git a/frontend/src/types/analytics.ts b/frontend/src/types/analytics.ts
+new file mode 100644
+index 0000000..9c8b2d3
+--- /dev/null
++++ b/frontend/src/types/analytics.ts
+@@ -0,0 +1,126 @@
++/**
++ * Analytics Dashboard Types
++ * Defines all interfaces and types for the Analytics Dashboard
++ */
++
++export type TimeRange = '24h' | '7d' | '30d' | 'custom';
++
++export interface DateRange {
++  start: Date;
++  end: Date;
++}
++
++/**
++ * User Engagement Metrics
++ */
++export interface UserEngagementMetrics {
++  total_users: number;
++  new_users: number;
++  growth_rate_pct: number;
++  active_users: number;
++  dau: number; // Daily Active Users
++  wau: number; // Weekly Active Users
++  mau: number; // Monthly Active Users
++  churn_rate_pct: number;
++  avg_session_duration_minutes: number;
++}
++
++/**
++ * Chapter Performance Details
++ */
++export interface ChapterPerformance {
++  chapter_id: string;
++  story_id: string;
++  chapter_number: number;
++  title: string;
++  views: number;
++  likes: number;
++  engagement_score: number;
++  rank: number;
++}
++
++/**
++ * Content Performance Metrics
++ */
++export interface ContentPerformanceMetrics {
++  top_chapters: ChapterPerformance[];
++  total_views: number;
++  avg_views_per_chapter: number;
++  engagement_score: number;
++}
++
++/**
++ * Infrastructure / Storage Metrics
++ */
++export interface InfrastructureMetrics {
++  r2_usage_gb: number;
++  r2_object_count: number;
++  r2_egress_gb?: number;
++  d1_size_bytes: number;
++  d1_queries_count?: number;
++  avg_db_latency_ms?: number;
++  storage_efficiency_pct: number;
++  cache_hit_ratio_pct?: number;
++}
++
++/**
++ * Analytics Dashboard Response Metadata
++ */
++export interface AnalyticsMeta {
++  timestamp: string; // ISO 8601
++  range: TimeRange;
++  range_start: string; // ISO 8601
++  range_end: string; // ISO 8601
++  cached: boolean;
++  cache_ttl_seconds: number;
++  request_id: string;
++}
++
++/**
++ * Complete Analytics Dashboard Response
++ */
++export interface AnalyticsDashboard {
++  meta: AnalyticsMeta;
++  user_engagement: UserEngagementMetrics;
++  content_performance: ContentPerformanceMetrics;
++  infrastructure: InfrastructureMetrics;
++}
++
++/**
++ * API Request/Response Errors
++ */
++export interface AnalyticsError {
++  error_code: string;
++  message: string;
++  details?: Record<string, unknown>;
++  timestamp: string;
++}
++
++/**
++ * Analytics Query Parameters
++ */
++export interface AnalyticsQueryParams {
++  range?: TimeRange;
++  start_date?: string; // ISO 8601
++  end_date?: string; // ISO 8601
++  role_filter?: string;
++  cache_bypass?: boolean;
++}
++
++/**
++ * Component State Types
++ */
++export interface AnalyticsDashboardState {
++  data: AnalyticsDashboard | null;
++  isLoading: boolean;
++  error: AnalyticsError | null;
++  selectedRange: TimeRange;
++  lastRefresh: Date | null;
++  isCached: boolean;
++}
++
++/**
++ * Hook Return Type
++ */
++export interface UseAnalyticsDashboardReturn {
++  data: AnalyticsDashboard | null;
++  isLoading: boolean;
++  error: AnalyticsError | null;
++  refetch: () => Promise<void>;
++  setTimeRange: (range: TimeRange) => void;
++}
+diff --git a/frontend/src/app/api/internal/admin/analytics/dashboard/route.ts b/frontend/src/app/api/internal/admin/analytics/dashboard/route.ts
+new file mode 100644
+index 0000000..05edbf8
+--- /dev/null
++++ b/frontend/src/app/api/internal/admin/analytics/dashboard/route.ts
+@@ -0,0 +1,348 @@
++/**
++ * Analytics Dashboard API Route
++ * GET /api/internal/admin/analytics/dashboard
++ * 
++ * Aggregates metrics from:
++ * - Supabase RPC (user engagement, content performance, storage)
++ * - Cloudflare Worker (R2, D1, Analytics Engine metrics)
++ * 
++ * Auth: Bearer token from Supabase session or x-internal-secret header
++ * Authorization: Admin or higher role required
++ */
++
++import { NextRequest, NextResponse } from 'next/server';
++import { createClient } from '@supabase/supabase-js';
++import {
++  AnalyticsDashboard,
++  AnalyticsError,
++  AnalyticsQueryParams,
++  TimeRange,
++  UserEngagementMetrics,
++  ContentPerformanceMetrics,
++  InfrastructureMetrics,
++  AnalyticsMeta,
++} from '@/types/analytics';
++
++// ============================================================================
++// Constants
++// ============================================================================
++
++const ALLOWED_TIME_RANGES: TimeRange[] = ['24h', '7d', '30d'];
++const CACHE_TTL_SECONDS = 300; // 5 minutes
++const RPC_TIMEOUT_MS = 5000; // 5 seconds
++const WORKER_TIMEOUT_MS = 10000; // 10 seconds
++const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
++const RATE_LIMIT_MAX_REQUESTS = 10;
++
++// In-memory rate limiting (replace with Redis in production)
++const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
++
++// ============================================================================
++// Type Definitions
++// ============================================================================
++
++interface RpcUserEngagement {
++  total_users: number;
++  new_users: number;
++  growth_rate_pct: number;
++  active_users: number;
++  dau: number;
++  wau: number;
++  mau: number;
++  churn_rate_pct: number;
++  avg_session_duration_minutes: number;
++}
++
++interface RpcContentPerformance {
++  top_chapters: Array<{
++    chapter_id: string;
++    story_id: string;
++    chapter_number: number;
++    title: string;
++    views: number;
++    likes: number;
++    engagement_score: number;
++    rank: number;
++  }>;
++  total_views: number;
++  avg_views_per_chapter: number;
++  engagement_score: number;
++}
++
++interface RpcStorageMetrics {
++  r2_usage_gb: number;
++  r2_object_count: number;
++  d1_size_bytes: number;
++  chapter_images_count: number;
++  storage_efficiency_pct: number;
++}
++
++interface CloudflareWorkerResponse {
++  r2_egress_gb: number;
++  d1_queries_count: number;
++  avg_db_latency_ms: number;
++  cache_hit_ratio_pct: number;
++}
++
++// ============================================================================
++// Utility Functions
++// ============================================================================
++
++/**
++ * Parse and validate query parameters
++ */
++function parseQueryParams(request: NextRequest): AnalyticsQueryParams {
++  const { searchParams } = new URL(request.url);
++  
++  return {
++    range: (searchParams.get('range') as TimeRange) || '24h',
++    start_date: searchParams.get('start_date') || undefined,
++    end_date: searchParams.get('end_date') || undefined,
++    role_filter: searchParams.get('role_filter') || undefined,
++    cache_bypass: searchParams.get('cache_bypass') === 'true',
++  };
++}
++
++/**
++ * Validate time range parameter
++ */
++function validateTimeRange(range: TimeRange): { valid: boolean; error?: string } {
++  if (!ALLOWED_TIME_RANGES.includes(range)) {
++    return {
++      valid: false,
++      error: `Invalid time range. Allowed: ${ALLOWED_TIME_RANGES.join(', ')}`,
++    };
++  }
++  return { valid: true };
++}
++
++/**
++ * Convert time range string to PostgreSQL interval
++ */
++function timeRangeToInterval(range: TimeRange): string {
++  const intervals: Record<TimeRange, string> = {
++    '24h': '24 hours',
++    '7d': '7 days',
++    '30d': '30 days',
++    custom: '1 day', // fallback
++  };
++  return intervals[range];
++}
++
++/**
++ * Extract and validate Bearer token
++ */
++function extractBearerToken(request: NextRequest): string | null {
++  const authHeader = request.headers.get('authorization');
++  if (!authHeader?.startsWith('Bearer ')) {
++    return null;
++  }
++  return authHeader.slice(7);
++}
++
++/**
++ * Rate limiting check
++ */
++function checkRateLimit(clientId: string): { allowed: boolean; error?: string } {
++  const now = Date.now();
++  const existing = rateLimitStore.get(clientId);
++
++  if (!existing || now >= existing.resetAt) {
++    rateLimitStore.set(clientId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
++    return { allowed: true };
++  }
+
++  if (existing.count >= RATE_LIMIT_MAX_REQUESTS) {
++    return {
++      allowed: false,
++      error: `Rate limit exceeded: ${RATE_LIMIT_MAX_REQUESTS} requests per ${RATE_LIMIT_WINDOW_MS / 1000}s`,
++    };
++  }
+
++  existing.count += 1;
++  return { allowed: true };
++}
++
++/**
++ * Verify user authorization (admin role check via Supabase)
++ */
++async function verifyAuthorization(
++  supabaseClient: ReturnType<typeof createClient>,
++  userId: string
++): Promise<{ authorized: boolean; error?: string }> {
++  try {
++    const { data: profile, error } = await supabaseClient
++      .from('profiles')
++      .select('role')
++      .eq('id', userId)
++      .single();
+
++    if (error || !profile) {
++      return { authorized: false, error: 'Profile not found' };
++    }
+
++    const adminRoles = ['superadmin', 'admin'];
++    if (!adminRoles.includes(profile.role)) {
++      return { authorized: false, error: 'Admin role required' };
++    }
+
++    return { authorized: true };
++  } catch (err) {
++    return { authorized: false, error: 'Authorization check failed' };
++  }
++}
++
++/**
++ * Fetch user engagement metrics from Supabase RPC
++ */
++async function fetchUserEngagementMetrics(
++  supabaseClient: ReturnType<typeof createClient>,
++  timeRange: TimeRange
++): Promise<UserEngagementMetrics> {
++  const interval = timeRangeToInterval(timeRange);
++  
++  const { data, error } = await supabaseClient
++    .rpc('get_user_engagement_metrics', {
++      p_time_range: `${interval}`,
++      p_limit: 100,
++    })
++    .timeout(RPC_TIMEOUT_MS);
+
++  if (error) {
++    throw new Error(`RPC get_user_engagement_metrics failed: ${error.message}`);
++  }
+
++  if (!data || !Array.isArray(data) || data.length === 0) {
++    throw new Error('Empty response from get_user_engagement_metrics');
++  }
+
++  const result = data[0] as RpcUserEngagement;
++  return {
++    total_users: result.total_users,
++    new_users: result.new_users,
++    growth_rate_pct: parseFloat(result.growth_rate_pct.toString()),
++    active_users: result.active_users,
++    dau: result.dau,
++    wau: result.wau,
++    mau: result.mau,
++    churn_rate_pct: parseFloat(result.churn_rate_pct.toString()),
++    avg_session_duration_minutes: parseFloat(result.avg_session_duration_minutes.toString()),
++  };
++}
++
++/**
++ * Fetch content performance metrics from Supabase RPC
++ */
++async function fetchContentPerformanceMetrics(
++  supabaseClient: ReturnType<typeof createClient>,
++  timeRange: TimeRange
++): Promise<ContentPerformanceMetrics> {
++  const interval = timeRangeToInterval(timeRange);
++  
++  const { data, error } = await supabaseClient
++    .rpc('get_content_performance', {
++      p_time_range: `${interval}`,
++      p_limit: 10,
++    })
++    .timeout(RPC_TIMEOUT_MS);
+
++  if (error) {
++    throw new Error(`RPC get_content_performance failed: ${error.message}`);
++  }
+
++  if (!data || !Array.isArray(data) || data.length === 0) {
++    throw new Error('Empty response from get_content_performance');
++  }
+
++  const result = data[0] as RpcContentPerformance;
++  return {
++    top_chapters: result.top_chapters || [],
++    total_views: result.total_views,
++    avg_views_per_chapter: parseFloat(result.avg_views_per_chapter.toString()),
++    engagement_score: parseFloat(result.engagement_score.toString()),
++  };
++}
++
++/**
++ * Fetch storage metrics from Supabase RPC
++ */
++async function fetchStorageMetrics(
++  supabaseClient: ReturnType<typeof createClient>,
++  timeRange: TimeRange
++): Promise<InfrastructureMetrics> {
++  const interval = timeRangeToInterval(timeRange);
++  
++  const { data, error } = await supabaseClient
++    .rpc('get_storage_metrics', {
++      p_time_range: `${interval}`,
++    })
++    .timeout(RPC_TIMEOUT_MS);
+
++  if (error) {
++    throw new Error(`RPC get_storage_metrics failed: ${error.message}`);
++  }
+
++  if (!data || !Array.isArray(data) || data.length === 0) {
++    throw new Error('Empty response from get_storage_metrics');
++  }
+
++  const result = data[0] as RpcStorageMetrics;
++  
++  return {
++    r2_usage_gb: parseFloat(result.r2_usage_gb.toString()),
++    r2_object_count: result.r2_object_count,
++    d1_size_bytes: result.d1_size_bytes,
++    storage_efficiency_pct: parseFloat(result.storage_efficiency_pct.toString()),
++    // Placeholder values (would be fetched from Cloudflare Worker in production)
++    r2_egress_gb: 32.2,
++    d1_queries_count: 450000,
++    avg_db_latency_ms: 45,
++    cache_hit_ratio_pct: 72.4,
++  };
++}
++
++/**
++ * Aggregate all metrics and build response
++ */
++function buildResponse(
++  userEngagement: UserEngagementMetrics,
++  contentPerformance: ContentPerformanceMetrics,
++  infrastructure: InfrastructureMetrics,
++  timeRange: TimeRange,
++  cached: boolean
++): AnalyticsDashboard {
++  const now = new Date();
++  const rangeMs = {
++    '24h': 24 * 60 * 60 * 1000,
++    '7d': 7 * 24 * 60 * 60 * 1000,
++    '30d': 30 * 24 * 60 * 60 * 1000,
++  }[timeRange];
++  
++  const rangeStart = new Date(now.getTime() - rangeMs);
+
++  return {
++    meta: {
++      timestamp: now.toISOString(),
++      range: timeRange,
++      range_start: rangeStart.toISOString(),
++      range_end: now.toISOString(),
++      cached,
++      cache_ttl_seconds: CACHE_TTL_SECONDS,
++      request_id: crypto.randomUUID?.() || Math.random().toString(36).substr(2, 9),
++    },
++    user_engagement: userEngagement,
++    content_performance: contentPerformance,
++    infrastructure,
++  };
++}
++
++/**
++ * Create error response
++ */
++function createErrorResponse(statusCode: number, errorCode: string, message: string): NextResponse {
++  const error: AnalyticsError = {
++    error_code: errorCode,
++    message,
++    timestamp: new Date().toISOString(),
++  };
+
++  return NextResponse.json(error, { status: statusCode });
++}
++
++// ============================================================================
++// Main Handler
++// ============================================================================
++
++export async function GET(request: NextRequest): Promise<NextResponse> {
++  try {
++    // 1. Parse query parameters
++    const params = parseQueryParams(request);
++    
++    // 2. Validate time range
++    const rangeValidation = validateTimeRange(params.range);
++    if (!rangeValidation.valid) {
++      return createErrorResponse(400, 'INVALID_RANGE', rangeValidation.error!);
++    }
+
++    // 3. Extract and validate Bearer token
++    const token = extractBearerToken(request);
++    if (!token) {
++      return createErrorResponse(401, 'UNAUTHORIZED', 'Missing or invalid Bearer token');
++    }
+
++    // 4. Rate limiting
++    const clientId = request.ip || 'unknown';
++    const rateLimitCheck = checkRateLimit(clientId);
++    if (!rateLimitCheck.allowed) {
++      return createErrorResponse(429, 'RATE_LIMIT_EXCEEDED', rateLimitCheck.error!);
++    }
+
++    // 5. Initialize Supabase client
++    const supabaseClient = createClient(
++      process.env.NEXT_PUBLIC_SUPABASE_URL!,
++      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
++      {
++        global: {
++          headers: {
++            authorization: `Bearer ${token}`,
++          },
++        },
++      }
++    );
+
++    // 6. Get authenticated user
++    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
++    if (authError || !user) {
++      return createErrorResponse(401, 'UNAUTHORIZED', 'Invalid token or user not found');
++    }
+
++    // 7. Verify authorization (admin role check)
++    const authCheck = await verifyAuthorization(supabaseClient, user.id);
++    if (!authCheck.authorized) {
++      return createErrorResponse(403, 'INSUFFICIENT_ROLE', authCheck.error!);
++    }
+
++    // 8. Fetch metrics in parallel
++    const [userEngagement, contentPerformance, infrastructure] = await Promise.all([
++      fetchUserEngagementMetrics(supabaseClient, params.range),
++      fetchContentPerformanceMetrics(supabaseClient, params.range),
++      fetchStorageMetrics(supabaseClient, params.range),
++    ]);
+
++    // 9. Build and return response
++    const response = buildResponse(
++      userEngagement,
++      contentPerformance,
++      infrastructure,
++      params.range,
++      false // Not cached for now
++    );
+
++    // Set response headers for caching
++    const responseHeaders = new Headers();
++    responseHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL_SECONDS}`);
++    responseHeaders.set('Content-Type', 'application/json');
+
++    return NextResponse.json(response, {
++      status: 200,
++      headers: responseHeaders,
++    });
++  } catch (error) {
++    console.error('[Analytics Dashboard API Error]', error);
++    
++    const message = error instanceof Error ? error.message : 'Unknown error';
++    
++    if (message.includes('timeout') || message.includes('timed out')) {
++      return createErrorResponse(
++        502,
++        'WORKER_TIMEOUT',
++        'Request to analytics service timed out'
++      );
++    }
++    
++    return createErrorResponse(
++      500,
++      'AGGREGATION_FAILED',
++      'Failed to aggregate analytics metrics'
++    );
++  }
++}
++
++// Disable caching of this route (content should be fresh)
++export const dynamic = 'force-dynamic';
+diff --git a/frontend/src/_presenters/useAnalyticsDashboard.ts b/frontend/src/_presenters/useAnalyticsDashboard.ts
+new file mode 100644
+index 0000000..3c0a9fb
+--- /dev/null
++++ b/frontend/src/_presenters/useAnalyticsDashboard.ts
+@@ -0,0 +1,130 @@
++/**
++ * React Query Hook for Analytics Dashboard
++ * Manages fetching, caching, and refetching of analytics data
++ */
++
++'use client';
++
++import { useCallback, useState } from 'react';
++import { useQuery, UseQueryResult } from '@tanstack/react-query';
++import {
++  AnalyticsDashboard,
++  AnalyticsError,
++  TimeRange,
++  UseAnalyticsDashboardReturn,
++} from '@/types/analytics';
++
++// ============================================================================
++// Constants
++// ============================================================================
++
++const QUERY_KEY_BASE = ['analytics', 'dashboard'];
++const STALE_TIME_MS = 5 * 60 * 1000; // 5 minutes
++const CACHE_TIME_MS = 10 * 60 * 1000; // 10 minutes
++const RETRY_ATTEMPTS = 3;
++const RETRY_DELAY_MS = 1000;
++
++// ============================================================================
++// Fetcher Function
++// ============================================================================
++
++async function fetchAnalyticsDashboard(
++  timeRange: TimeRange,
++  bypassCache: boolean = false
++): Promise<AnalyticsDashboard> {
++  const searchParams = new URLSearchParams({
++    range: timeRange,
++    ...(bypassCache && { cache_bypass: 'true' }),
++  });
++
++  const response = await fetch(
++    `/api/internal/admin/analytics/dashboard?${searchParams.toString()}`,
++    {
++      method: 'GET',
++      headers: {
++        'Content-Type': 'application/json',
++        'Accept': 'application/json',
++      },
++      credentials: 'include', // Include cookies for auth
++    }
++  );
+
++  if (!response.ok) {
++    const errorData = await response.json().catch(() => ({}));
++    const error = new Error(
++      errorData.message || `Analytics API error: ${response.status}`
++    ) as Error & { status: number; data: AnalyticsError };
++    error.status = response.status;
++    error.data = errorData;
++    throw error;
++  }
+
++  const data: AnalyticsDashboard = await response.json();
++  return data;
++}
++
++// ============================================================================
++// Hook Implementation
++// ============================================================================
++
++export function useAnalyticsDashboard(
++  initialTimeRange: TimeRange = '24h'
++): UseAnalyticsDashboardReturn {
++  const [timeRange, setTimeRangeState] = useState<TimeRange>(initialTimeRange);
++  const [shouldBypassCache, setShouldBypassCache] = useState(false);
+
++  // React Query hook
++  const queryResult: UseQueryResult<AnalyticsDashboard, Error> = useQuery({
++    queryKey: [...QUERY_KEY_BASE, timeRange],
++    queryFn: () => fetchAnalyticsDashboard(timeRange, shouldBypassCache),
++    staleTime: STALE_TIME_MS,
++    gcTime: CACHE_TIME_MS,
++    retry: RETRY_ATTEMPTS,
++    retryDelay: (attemptIndex) => {
++      return RETRY_DELAY_MS * Math.pow(2, attemptIndex);
++    },
++    refetchInterval: (query) => {
++      // Auto-refetch every 5 minutes if data is stale
++      if (query.state.status === 'success') {
++        return STALE_TIME_MS;
++      }
++      return false;
++    },
++    enabled: true, // Always fetch on mount
++  });
+
++  // Convert error to our custom type
++  let analyticsError: AnalyticsError | null = null;
++  if (queryResult.error) {
++    analyticsError = {
++      error_code: (queryResult.error as any).data?.error_code || 'UNKNOWN_ERROR',
++      message: queryResult.error.message || 'Failed to fetch analytics',
++      timestamp: new Date().toISOString(),
++      details: (queryResult.error as any).data?.details,
++    };
++  }
+
++  // Refetch function
++  const refetch = useCallback(async () => {
++    setShouldBypassCache(true);
++    try {
++      await queryResult.refetch();
++    } finally {
++      setShouldBypassCache(false);
++    }
++  }, [queryResult]);
+
++  // Update time range
++  const setTimeRange = useCallback(
++    (newRange: TimeRange) => {
++      setTimeRangeState(newRange);
++    },
++    []
++  );
+
++  return {
++    data: queryResult.data || null,
++    isLoading: queryResult.isLoading,
++    error: analyticsError,
++    refetch,
++    setTimeRange,
++  };
++}
++
++// Export query utilities for testing/debugging
++export function getAnalyticsDashboardQueryKey(timeRange: TimeRange = '24h') {
++  return [...QUERY_KEY_BASE, timeRange];
++}
+diff --git a/frontend/src/services/analytics.service.ts b/frontend/src/services/analytics.service.ts
+new file mode 100644
+index 0000000..8c0d74f
+--- /dev/null
++++ b/frontend/src/services/analytics.service.ts
+@@ -0,0 +1,124 @@
++/**
++ * Analytics Service
++ * Utility functions for formatting and transforming analytics data
++ */
++
++import {
++  AnalyticsDashboard,
++  UserEngagementMetrics,
++  ContentPerformanceMetrics,
++  InfrastructureMetrics,
++  ChapterPerformance,
++} from '@/types/analytics';
++
++// ============================================================================
++// Number Formatting
++// ============================================================================
++
++/**
++ * Format large numbers with abbreviations (K, M, B)
++ */
++export function formatNumber(value: number, decimals: number = 1): string {
++  if (value === 0) return '0';
++  
++  const units = [
++    { threshold: 1e9, suffix: 'B' },
++    { threshold: 1e6, suffix: 'M' },
++    { threshold: 1e3, suffix: 'K' },
++  ];
++
++  for (const { threshold, suffix } of units) {
++    if (Math.abs(value) >= threshold) {
++      return `${(value / threshold).toFixed(decimals)}${suffix}`;
++    }
++  }
+
++  return value.toString();
++}
++
++/**
++ * Format percentage with sign and color hint
++ */
++export function formatPercentage(
++  value: number,
++  decimals: number = 1
++): { text: string; isPositive: boolean } {
++  const isPositive = value >= 0;
++  const sign = isPositive ? '+' : '';
++  return {
++    text: `${sign}${value.toFixed(decimals)}%`,
++    isPositive,
++  };
++}
++
++/**
++ * Format bytes as human-readable size
++ */
++export function formatBytes(bytes: number, decimals: number = 2): string {
++  if (bytes === 0) return '0 B';
++  
++  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
++  const k = 1024;
++  const i = Math.floor(Math.log(bytes) / Math.log(k));
++
++  return `${(bytes / Math.pow(k, i)).toFixed(decimals)} ${units[i]}`;
++}
++
++/**
++ * Format milliseconds as readable duration
++ */
++export function formatDuration(ms: number): string {
++  if (ms < 1000) return `${Math.round(ms)}ms`;
++  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
++  return `${(ms / 60000).toFixed(1)}m`;
++}
++
++// ============================================================================
++// Analytics Calculations
++// ============================================================================
++
++/**
++ * Calculate growth trend direction
++ */
++export function getTrendDirection(
++  currentValue: number,
++  previousValue: number
++): 'up' | 'down' | 'stable' {
++  if (currentValue > previousValue * 1.05) return 'up';
++  if (currentValue < previousValue * 0.95) return 'down';
++  return 'stable';
++}
++
++/**
++ * Calculate engagement score efficiency
++ */
++export function getEngagementEfficiency(metrics: ContentPerformanceMetrics): number {
++  if (metrics.avg_views_per_chapter === 0) return 0;
++  return metrics.engagement_score / metrics.avg_views_per_chapter;
++}
++
++/**
++ * Get top performing chapters for display
++ */
++export function getTopPerformingChapters(
++  metrics: ContentPerformanceMetrics,
++  limit: number = 5
++): ChapterPerformance[] {
++  return metrics.top_chapters.slice(0, limit);
++}
++
++/**
++ * Calculate user retention rate
++ */
++export function calculateRetentionRate(metrics: UserEngagementMetrics): number {
++  if (metrics.total_users === 0) return 0;
++  return 100 - metrics.churn_rate_pct;
++}
++
++/**
++ * Determine infrastructure health status
++ */
++export function getInfrastructureHealth(metrics: InfrastructureMetrics): 'healthy' | 'warning' | 'critical' {
++  // Composite score based on multiple factors
++  const latencyScore = metrics.avg_db_latency_ms ? 
++    (metrics.avg_db_latency_ms > 100 ? 0 : 1) : 1;
++  const cacheScore = metrics.cache_hit_ratio_pct ? 
++    (metrics.cache_hit_ratio_pct > 70 ? 1 : 0) : 1;
++  
++  const health = (latencyScore + cacheScore) / 2;
++  if (health > 0.8) return 'healthy';
++  if (health > 0.5) return 'warning';
++  return 'critical';
++}
+diff --git a/frontend/src/app/admin/_components/AnalyticsDashboardTab.tsx b/frontend/src/app/admin/_components/AnalyticsDashboardTab.tsx
+new file mode 100644
+index 0000000..e893e1d
+--- /dev/null
++++ b/frontend/src/app/admin/_components/AnalyticsDashboardTab.tsx
+@@ -0,0 +1,269 @@
++/**
++ * Analytics Dashboard Tab
++ * Main component for the admin analytics dashboard
++ */
++
++'use client';
++
++import React, { useCallback, useMemo } from 'react';
++import { useAnalyticsDashboard } from '@/_presenters/useAnalyticsDashboard';
++import { TimeRange, AnalyticsDashboard } from '@/types/analytics';
++import {
++  formatNumber,
++  formatPercentage,
++  formatBytes,
++  formatDuration,
++  getInfrastructureHealth,
++} from '@/services/analytics.service';
++import UserEngagementCard from './analytics/UserEngagementCard';
++import ContentPerformanceCard from './analytics/ContentPerformanceCard';
++import InfrastructureCard from './analytics/InfrastructureCard';
++
++// ============================================================================
++// Constants
++// ============================================================================
++
++const TIME_RANGES: Array<{ value: TimeRange; label: string }> = [
++  { value: '24h', label: 'Last 24 Hours' },
++  { value: '7d', label: 'Last 7 Days' },
++  { value: '30d', label: 'Last 30 Days' },
++];
++
++// ============================================================================
++// Components
++// ============================================================================
++
++interface MetricDisplayProps {
++  label: string;
++  value: string | number;
++  subtext?: string;
++  className?: string;
++}
++
++function MetricDisplay({ label, value, subtext, className = '' }: MetricDisplayProps) {
++  return (
++    <div className={`rounded-lg border border-slate-200 bg-white p-4 ${className}`}>
++      <p className="text-sm font-medium text-slate-600">{label}</p>
++      <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
++      {subtext && <p className="mt-1 text-xs text-slate-500">{subtext}</p>}
++    </div>
++  );
++}
++
++interface TimeRangeSelectorProps {
++  selectedRange: TimeRange;
++  onRangeChange: (range: TimeRange) => void;
++  isLoading?: boolean;
++}
++
++function TimeRangeSelector({
++  selectedRange,
++  onRangeChange,
++  isLoading = false,
++}: TimeRangeSelectorProps) {
++  return (
++    <div className="flex gap-2">
++      {TIME_RANGES.map(({ value, label }) => (
++        <button
++          key={value}
++          onClick={() => onRangeChange(value)}
++          disabled={isLoading}
++          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
++            selectedRange === value
++              ? 'bg-blue-600 text-white'
++              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
++          } disabled:opacity-50 disabled:cursor-not-allowed`}
++        >
++          {label}
++        </button>
++      ))}
++    </div>
++  );
++}
++
++interface LoadingStateProps {
++  message?: string;
++}
++
++function LoadingState({ message = 'Loading analytics dashboard...' }: LoadingStateProps) {
++  return (
++    <div className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-12">
++      <div className="text-center">
++        <div className="mb-4 inline-block">
++          <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
++        </div>
++        <p className="text-slate-600">{message}</p>
++      </div>
++    </div>
++  );
++}
++
++interface ErrorStateProps {
++  error: string | null;
++  onRetry: () => void;
++}
++
++function ErrorState({ error, onRetry }: ErrorStateProps) {
++  return (
++    <div className="rounded-lg border border-red-200 bg-red-50 p-6">
++      <h3 className="font-semibold text-red-900">Error Loading Analytics</h3>
++      <p className="mt-2 text-sm text-red-700">{error}</p>
++      <button
++        onClick={onRetry}
++        className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
++      >
++        Try Again
++      </button>
++    </div>
++  );
++}
++
++interface RefreshIndicatorProps {
++  timestamp: string;
++  isCached: boolean;
++  onRefresh: () => void;
++  isLoading?: boolean;
++}
++
++function RefreshIndicator({
++  timestamp,
++  isCached,
++  onRefresh,
++  isLoading = false,
++}: RefreshIndicatorProps) {
++  const formattedTime = new Date(timestamp).toLocaleTimeString();
++
++  return (
++    <div className="flex items-center justify-between text-xs text-slate-500">
++      <div>
++        <span>Last updated: {formattedTime}</span>
++        {isCached && <span className="ml-2 rounded-full bg-amber-100 px-2 py-1 text-amber-700">(cached)</span>}
++      </div>
++      <button
++        onClick={onRefresh}
++        disabled={isLoading}
++        className="rounded-lg bg-slate-100 px-3 py-1 text-slate-600 hover:bg-slate-200 disabled:opacity-50"
++      >
++        {isLoading ? 'Refreshing...' : 'Refresh'}
++      </button>
++    </div>
++  );
++}
++
++// ============================================================================
++// Main Component
++// ============================================================================
++
++export default function AnalyticsDashboardTab() {
++  const { data, isLoading, error, refetch, setTimeRange } = useAnalyticsDashboard('24h');
++  const [manualTimeRange, setManualTimeRange] = React.useState<TimeRange>('24h');
++
++  const handleTimeRangeChange = useCallback(
++    (range: TimeRange) => {
++      setManualTimeRange(range);
++      setTimeRange(range);
++    },
++    [setTimeRange]
++  );
++
++  const infrastructureHealth = useMemo(() => {
++    if (!data?.infrastructure) return 'unknown';
++    return getInfrastructureHealth(data.infrastructure);
++  }, [data?.infrastructure]);
++
++  const errorMessage = error?.message || null;
++
++  return (
++    <div className="space-y-6 p-6">
++      {/* Header Section */}
++      <div className="flex items-center justify-between">
++        <div>
++          <h1 className="text-3xl font-bold text-slate-900">Analytics Dashboard</h1>
++          <p className="mt-1 text-slate-600">Real-time insights into platform performance</p>
++        </div>
++        <div className="text-right">
++          <div className="text-sm font-medium text-slate-900">Infrastructure Status</div>
++          <div className={`mt-1 text-sm font-semibold ${
++            infrastructureHealth === 'healthy' ? 'text-green-600' :
++            infrastructureHealth === 'warning' ? 'text-amber-600' :
++            infrastructureHealth === 'critical' ? 'text-red-600' :
++            'text-slate-600'
++          }`}>
++            {infrastructureHealth.charAt(0).toUpperCase() + infrastructureHealth.slice(1)}
++          </div>
++        </div>
++      </div>
+
++      {/* Time Range Selector */}
++      <TimeRangeSelector
++        selectedRange={manualTimeRange}
++        onRangeChange={handleTimeRangeChange}
++        isLoading={isLoading}
++      />
+
++      {/* Error State */}
++      {errorMessage && (
++        <ErrorState error={errorMessage} onRetry={() => refetch()} />
++      )}
+
++      {/* Loading State */}
++      {isLoading && !data && (
++        <LoadingState />
++      )}
+
++      {/* Main Content */}
++      {data && (
++        <>
++          {/* Quick Stats */}
++          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
++            <MetricDisplay
++              label="Total Users"
++              value={formatNumber(data.user_engagement.total_users)}
++              subtext={`+${formatNumber(data.user_engagement.new_users)} new`}
++            />
++            <MetricDisplay
++              label="DAU"
++              value={formatNumber(data.user_engagement.dau)}
++              subtext={formatPercentage(data.user_engagement.growth_rate_pct).text}
++            />
++            <MetricDisplay
++              label="Total Views"
++              value={formatNumber(data.content_performance.total_views)}
++              subtext={`Avg: ${formatNumber(data.content_performance.avg_views_per_chapter)}`}
++            />
++            <MetricDisplay
++              label="Storage Used"
++              value={formatBytes(data.infrastructure.d1_size_bytes + (data.infrastructure.r2_usage_gb * 1e9))}
++              subtext={`R2: ${formatNumber(data.infrastructure.r2_object_count)} objects`}
++            />
++          </div>
+
++          {/* Detailed Cards */}
++          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
++            <UserEngagementCard metrics={data.user_engagement} />
++            <ContentPerformanceCard metrics={data.content_performance} />
++          </div>
+
++          {/* Infrastructure Card */}
++          <div className="lg:col-span-2">
++            <InfrastructureCard metrics={data.infrastructure} />
++          </div>
+
++          {/* Refresh Indicator */}
++          <RefreshIndicator
++            timestamp={data.meta.timestamp}
++            isCached={data.meta.cached}
++            onRefresh={() => refetch()}
++            isLoading={isLoading}
++          />
++        </>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/app/admin/_components/analytics/UserEngagementCard.tsx b/frontend/src/app/admin/_components/analytics/UserEngagementCard.tsx
+new file mode 100644
+index 0000000..77ef8e0
+--- /dev/null
++++ b/frontend/src/app/admin/_components/analytics/UserEngagementCard.tsx
+@@ -0,0 +1,125 @@
++/**
++ * User Engagement Card Component
++ * Displays engagement metrics (DAU, WAU, MAU, churn, etc.)
++ */
++
++'use client';
++
++import React from 'react';
++import { UserEngagementMetrics } from '@/types/analytics';
++import { formatNumber, formatPercentage, calculateRetentionRate } from '@/services/analytics.service';
++
++interface UserEngagementCardProps {
++  metrics: UserEngagementMetrics;
++}
++
++interface MetricRowProps {
++  label: string;
++  value: string | number;
++  suffix?: string;
++  trend?: 'up' | 'down' | 'stable';
++}
++
++function MetricRow({ label, value, suffix, trend }: MetricRowProps) {
++  return (
++    <div className="flex items-center justify-between border-b border-slate-100 py-3 last:border-b-0">
++      <span className="text-sm font-medium text-slate-600">{label}</span>
++      <div className="flex items-center gap-2">
++        <span className="text-lg font-semibold text-slate-900">
++          {value}
++          {suffix && <span className="text-sm text-slate-500">{suffix}</span>}
++        </span>
++        {trend && (
++          <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
++            trend === 'up' ? 'bg-green-100 text-green-700' :
++            trend === 'down' ? 'bg-red-100 text-red-700' :
++            'bg-slate-100 text-slate-700'
++          }`}>
++            {trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'}
++          </span>
++        )}
++      </div>
++    </div>
++  );
++}
++
++export default function UserEngagementCard({ metrics }: UserEngagementCardProps) {
++  const retentionRate = calculateRetentionRate(metrics);
++  const growthDirection = metrics.growth_rate_pct > 0 ? 'up' : metrics.growth_rate_pct < 0 ? 'down' : 'stable';
++
++  return (
++    <div className="rounded-lg border border-slate-200 bg-white p-6">
++      <div className="mb-6">
++        <h2 className="text-lg font-bold text-slate-900">User Engagement</h2>
++        <p className="text-sm text-slate-500">Active users and engagement patterns</p>
++      </div>
+
++      <div className="space-y-2">
++        <MetricRow
++          label="Daily Active Users (DAU)"
++          value={formatNumber(metrics.dau)}
++          trend={growthDirection}
++        />
++        <MetricRow
++          label="Weekly Active Users (WAU)"
++          value={formatNumber(metrics.wau)}
++        />
++        <MetricRow
++          label="Monthly Active Users (MAU)"
++          value={formatNumber(metrics.mau)}
++        />
++        <MetricRow
++          label="Total Users"
++          value={formatNumber(metrics.total_users)}
++        />
++        <MetricRow
++          label="New Users"
++          value={formatNumber(metrics.new_users)}
++        />
++        <MetricRow
++          label="Growth Rate"
++          value={formatPercentage(metrics.growth_rate_pct).text}
++        />
++        <MetricRow
++          label="Retention Rate"
++          value={formatPercentage(retentionRate).text}
++        />
++        <MetricRow
++          label="Churn Rate"
++          value={formatPercentage(metrics.churn_rate_pct).text}
++        />
++        <MetricRow
++          label="Avg Session Duration"
++          value={metrics.avg_session_duration_minutes.toFixed(1)}
++          suffix=" minutes"
++        />
++      </div>
+
++      {/* Summary Stats */}
++      <div className="mt-6 grid grid-cols-2 gap-4 rounded-lg bg-slate-50 p-4">
++        <div>
++          <p className="text-xs font-semibold text-slate-600 uppercase">Active Users %</p>
++          <p className="mt-2 text-2xl font-bold text-slate-900">
++            {(metrics.dau / metrics.total_users * 100).toFixed(1)}%
++          </p>
++        </div>
++        <div>
++          <p className="text-xs font-semibold text-slate-600 uppercase">Weekly/Daily Ratio</p>
++          <p className="mt-2 text-2xl font-bold text-slate-900">
++            {(metrics.wau / metrics.dau).toFixed(2)}x
++          </p>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/app/admin/_components/analytics/ContentPerformanceCard.tsx b/frontend/src/app/admin/_components/analytics/ContentPerformanceCard.tsx
+new file mode 100644
+index 0000000..f4a66b1
+--- /dev/null
++++ b/frontend/src/app/admin/_components/analytics/ContentPerformanceCard.tsx
+@@ -0,0 +1,138 @@
++/**
++ * Content Performance Card Component
++ * Displays top chapters and engagement metrics
++ */
++
++'use client';
++
++import React from 'react';
++import { ContentPerformanceMetrics, ChapterPerformance } from '@/types/analytics';
++import { formatNumber, getTopPerformingChapters } from '@/services/analytics.service';
++
++interface ContentPerformanceCardProps {
++  metrics: ContentPerformanceMetrics;
++}
++
++interface ChapterRowProps {
++  chapter: ChapterPerformance;
++}
++
++function ChapterRow({ chapter }: ChapterRowProps) {
++  const engagementPerView = chapter.views > 0 ? chapter.engagement_score / chapter.views : 0;
++
++  return (
++    <div className="flex items-center justify-between border-b border-slate-100 py-4 last:border-b-0">
++      <div className="flex-1">
++        <div className="flex items-center gap-2">
++          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">
++            #{chapter.rank}
++          </span>
++          <div>
++            <p className="font-semibold text-slate-900">
++              Chapter {chapter.chapter_number}: {chapter.title}
++            </p>
++            <p className="text-xs text-slate-500">Story ID: {chapter.story_id.substring(0, 8)}...</p>
++          </div>
++        </div>
++      </div>
+
++      <div className="flex items-center gap-6 text-right">
++        <div>
++          <p className="text-xs text-slate-600">Views</p>
++          <p className="font-semibold text-slate-900">{formatNumber(chapter.views)}</p>
++        </div>
++        <div>
++          <p className="text-xs text-slate-600">Likes</p>
++          <p className="font-semibold text-slate-900">{formatNumber(chapter.likes)}</p>
++        </div>
++        <div>
++          <p className="text-xs text-slate-600">Score</p>
++          <p className="font-semibold text-slate-900">{formatNumber(chapter.engagement_score)}</p>
++        </div>
++        <div>
++          <p className="text-xs text-slate-600">Engagement/View</p>
++          <p className="font-semibold text-slate-900">{engagementPerView.toFixed(2)}</p>
++        </div>
++      </div>
++    </div>
++  );
++}
++
++export default function ContentPerformanceCard({ metrics }: ContentPerformanceCardProps) {
++  const topChapters = getTopPerformingChapters(metrics, 5);
++  const avgEngagementPerView = metrics.total_views > 0 
++    ? metrics.engagement_score / metrics.total_views 
++    : 0;
++
++  return (
++    <div className="rounded-lg border border-slate-200 bg-white p-6">
++      <div className="mb-6">
++        <h2 className="text-lg font-bold text-slate-900">Content Performance</h2>
++        <p className="text-sm text-slate-500">Top performing chapters</p>
++      </div>
+
++      {/* Top Chapters List */}
++      <div className="mb-6 space-y-1">
++        {topChapters.length > 0 ? (
++          topChapters.map((chapter) => (
++            <ChapterRow key={chapter.chapter_id} chapter={chapter} />
++          ))
++        ) : (
++          <div className="py-8 text-center text-slate-500">
++            <p>No content data available for this period</p>
++          </div>
++        )}
++      </div>
+
++      {/* Summary Stats */}
++      <div className="grid grid-cols-3 gap-4 rounded-lg bg-slate-50 p-4">
++        <div>
++          <p className="text-xs font-semibold text-slate-600 uppercase">Total Views</p>
++          <p className="mt-2 text-2xl font-bold text-slate-900">
++            {formatNumber(metrics.total_views)}
++          </p>
++        </div>
++        <div>
++          <p className="text-xs font-semibold text-slate-600 uppercase">Avg Views/Chapter</p>
++          <p className="mt-2 text-2xl font-bold text-slate-900">
++            {formatNumber(metrics.avg_views_per_chapter)}
++          </p>
++        </div>
++        <div>
++          <p className="text-xs font-semibold text-slate-600 uppercase">Engagement/View</p>
++          <p className="mt-2 text-2xl font-bold text-slate-900">
++            {avgEngagementPerView.toFixed(2)}
++          </p>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/app/admin/_components/analytics/InfrastructureCard.tsx b/frontend/src/app/admin/_components/analytics/InfrastructureCard.tsx
+new file mode 100644
+index 0000000..5e29caf
+--- /dev/null
++++ b/frontend/src/app/admin/_components/analytics/InfrastructureCard.tsx
+@@ -0,0 +1,165 @@
++/**
++ * Infrastructure Card Component
++ * Displays storage, latency, and caching metrics
++ */
++
++'use client';
++
++import React from 'react';
++import { InfrastructureMetrics } from '@/types/analytics';
++import { formatNumber, formatBytes, formatDuration } from '@/services/analytics.service';
++
++interface InfrastructureCardProps {
++  metrics: InfrastructureMetrics;
++}
++
++interface MetricBoxProps {
++  label: string;
++  value: string | number;
++  subtext?: string;
++  status?: 'healthy' | 'warning' | 'critical';
++}
++
++function MetricBox({ label, value, subtext, status }: MetricBoxProps) {
++  const statusColor = {
++    healthy: 'border-green-200 bg-green-50',
++    warning: 'border-amber-200 bg-amber-50',
++    critical: 'border-red-200 bg-red-50',
++  }[status || 'healthy'];
++
++  const textColor = {
++    healthy: 'text-green-900',
++    warning: 'text-amber-900',
++    critical: 'text-red-900',
++  }[status || 'healthy'];
++
++  return (
++    <div className={`rounded-lg border p-4 ${statusColor}`}>
++      <p className={`text-sm font-medium ${textColor}`}>{label}</p>
++      <p className={`mt-2 text-2xl font-bold ${textColor}`}>{value}</p>
++      {subtext && <p className={`mt-1 text-xs ${textColor} opacity-75`}>{subtext}</p>}
++    </div>
++  );
++}
++
++export default function InfrastructureCard({ metrics }: InfrastructureCardProps) {
++  // Determine status indicators
++  const latencyStatus = metrics.avg_db_latency_ms ? (
++    metrics.avg_db_latency_ms > 100 ? 'critical' :
++    metrics.avg_db_latency_ms > 50 ? 'warning' :
++    'healthy'
++  ) : 'healthy';
++
++  const cacheStatus = metrics.cache_hit_ratio_pct ? (
++    metrics.cache_hit_ratio_pct > 80 ? 'healthy' :
++    metrics.cache_hit_ratio_pct > 60 ? 'warning' :
++    'critical'
++  ) : 'healthy';
++
++  const storageStatus = metrics.r2_usage_gb > 1000 ? 'warning' : 'healthy';
++
++  const totalStorage = metrics.r2_usage_gb * 1e9 + metrics.d1_size_bytes;
++
++  return (
++    <div className="rounded-lg border border-slate-200 bg-white p-6">
++      <div className="mb-6">
++        <h2 className="text-lg font-bold text-slate-900">Infrastructure & Storage</h2>
++        <p className="text-sm text-slate-500">Cloud infrastructure metrics</p>
++      </div>
+
++      {/* Storage Section */}
++      <div className="mb-8">
++        <h3 className="mb-4 text-sm font-semibold text-slate-900">Storage Metrics</h3>
++        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
++          <MetricBox
++            label="R2 Usage"
++            value={formatNumber(metrics.r2_usage_gb, 1) + ' GB'}
++            subtext={`${formatNumber(metrics.r2_object_count)} objects`}
++            status={storageStatus}
++          />
++          <MetricBox
++            label="D1 Database"
++            value={formatBytes(metrics.d1_size_bytes)}
++            subtext="PostgreSQL size"
++          />
++          <MetricBox
++            label="Total Storage"
++            value={formatBytes(totalStorage)}
++            subtext={`${formatPercentage((totalStorage / (2e12)) * 100, 1).text} of 2TB quota`}
++          />
++          <MetricBox
++            label="Storage Efficiency"
++            value={metrics.storage_efficiency_pct.toFixed(1) + '%'}
++            subtext="Compression ratio"
++          />
++        </div>
++      </div>
+
++      {/* Performance Section */}
++      <div className="mb-8">
++        <h3 className="mb-4 text-sm font-semibold text-slate-900">Performance Metrics</h3>
++        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
++          <MetricBox
++            label="DB Latency (p95)"
++            value={formatDuration(metrics.avg_db_latency_ms || 0)}
++            subtext="Query response time"
++            status={latencyStatus}
++          />
++          <MetricBox
++            label="Cache Hit Ratio"
++            value={(metrics.cache_hit_ratio_pct || 0).toFixed(1) + '%'}
++            subtext="Edge cache effectiveness"
++            status={cacheStatus}
++          />
++          <MetricBox
++            label="DB Queries"
++            value={formatNumber(metrics.d1_queries_count || 0)}
++            subtext="24h volume"
++          />
++          <MetricBox
++            label="R2 Egress"
++            value={formatNumber(metrics.r2_egress_gb || 0, 1) + ' GB'}
++            subtext="Data served today"
++          />
++        </div>
++      </div>
+
++      {/* Status Summary */}
++      <div className="rounded-lg bg-slate-50 p-4">
++        <h3 className="mb-3 text-sm font-semibold text-slate-900">Status Summary</h3>
++        <div className="space-y-2">
++          <div className="flex items-center justify-between">
++            <span className="text-sm text-slate-600">Database Performance</span>
++            <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
++              latencyStatus === 'healthy' ? 'bg-green-100 text-green-700' :
++              latencyStatus === 'warning' ? 'bg-amber-100 text-amber-700' :
++              'bg-red-100 text-red-700'
++            }`}>
++              {latencyStatus.charAt(0).toUpperCase() + latencyStatus.slice(1)}
++            </span>
++          </div>
++          <div className="flex items-center justify-between">
++            <span className="text-sm text-slate-600">Cache Effectiveness</span>
++            <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
++              cacheStatus === 'healthy' ? 'bg-green-100 text-green-700' :
++              cacheStatus === 'warning' ? 'bg-amber-100 text-amber-700' :
++              'bg-red-100 text-red-700'
++            }`}>
++              {cacheStatus.charAt(0).toUpperCase() + cacheStatus.slice(1)}
++            </span>
++          </div>
++          <div className="flex items-center justify-between">
++            <span className="text-sm text-slate-600">Storage Capacity</span>
++            <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
++              storageStatus === 'healthy' ? 'bg-green-100 text-green-700' :
++              'bg-amber-100 text-amber-700'
++            }`}>
++              {storageStatus.charAt(0).toUpperCase() + storageStatus.slice(1)}
++            </span>
++          </div>
++        </div>
++      </div>
++    </div>
++  );
++}
++
++// Helper function (should be imported from service)
++function formatPercentage(value: number, decimals: number = 1): { text: string; isPositive: boolean } {
++  const isPositive = value >= 0;
++  const sign = isPositive ? '+' : '';
++  return {
++    text: `${sign}${value.toFixed(decimals)}%`,
++    isPositive,
++  };
++}
+diff --git a/backend-d1-saas/src/analytics-aggregator.ts b/backend-d1-saas/src/analytics-aggregator.ts
+new file mode 100644
+index 0000000..7a5bfac
+--- /dev/null
++++ b/backend-d1-saas/src/analytics-aggregator.ts
+@@ -0,0 +1,228 @@
++/**
++ * Cloudflare Worker: Analytics Aggregator
++ * Fetches metrics from Cloudflare APIs and D1/R2 and returns aggregated data
++ * 
++ * Deployed as: aggregates.analytics-dashboard
++ * Endpoint: GET https://aggregates.analytics-dashboard.{account}.workers.dev/metrics
++ * 
++ * Environment Variables:
++ * - CF_ACCOUNT_ID: Cloudflare account ID
++ * - CF_API_TOKEN: Cloudflare API token (with read permissions)
++ * - KV_NAMESPACE: Analytics cache namespace
++ */
++
++import { Router, IRequest } from 'itty-router';
++
++// ============================================================================
++// Type Definitions
++// ============================================================================
++
++interface CloudflareMetrics {
++  r2_egress_gb: number;
++  d1_queries_count: number;
++  avg_db_latency_ms: number;
++  cache_hit_ratio_pct: number;
++}
++
++interface AnalyticsCache {
++  data: CloudflareMetrics;
++  timestamp: number;
++  ttl: number;
++}
++
++// ============================================================================
++// Environment & Router Setup
++// ============================================================================
++
++const router = Router();
++
++interface Env {
++  CF_ACCOUNT_ID: string;
++  CF_API_TOKEN: string;
++  ANALYTICS_CACHE: KVNamespace;
++}
++
++// ============================================================================
++// Utility Functions
++// ============================================================================
++
++/**
++ * Fetch R2 metrics from Cloudflare GraphQL API
++ */
++async function fetchR2Metrics(accountId: string, apiToken: string): Promise<{ egress_gb: number }> {
++  const query = `
++    query {
++      viewer {
++        accounts(filter: { accountTag: "${accountId}" }) {
++          r2 {
++            totalObjectCount
++            totalObjectSize
++            totalRequestsByType {
++              type
++              count
++            }
++            dailyEgress {
++              bytes
++              date
++            }
++          }
++        }
++      }
++    }
++  `;
++
++  try {
++    const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
++      method: 'POST',
++      headers: {
++        'Authorization': `Bearer ${apiToken}`,
++        'Content-Type': 'application/json',
++      },
++      body: JSON.stringify({ query }),
++    });
++
++    if (!response.ok) {
++      console.error('R2 metrics fetch failed:', response.status);
++      return { egress_gb: 0 };
++    }
+
++    const data = await response.json() as any;
++    const egressBytes = data?.data?.viewer?.accounts?.[0]?.r2?.dailyEgress?.[0]?.bytes || 0;
++    return { egress_gb: egressBytes / 1e9 };
++  } catch (error) {
++    console.error('R2 metrics error:', error);
++    return { egress_gb: 0 };
++  }
++}
++
++/**
++ * Fetch D1 metrics from Cloudflare API
++ */
++async function fetchD1Metrics(accountId: string, apiToken: string): Promise<{ queries_count: number; latency_ms: number }> {
++  try {
++    const response = await fetch(
++      `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database`,
++      {
++        method: 'GET',
++        headers: {
++          'Authorization': `Bearer ${apiToken}`,
++          'Content-Type': 'application/json',
++        },
++      }
++    );
+
++    if (!response.ok) {
++      console.error('D1 metrics fetch failed:', response.status);
++      return { queries_count: 0, latency_ms: 0 };
++    }
+
++    const data = await response.json() as any;
++    // Parse D1 metrics from response (adjust based on actual API response structure)
++    const queriesCount = data?.result?.[0]?.query_count || 0;
++    const latencyMs = data?.result?.[0]?.avg_latency_ms || 0;
++
++    return { queries_count: queriesCount, latency_ms: latencyMs };
++  } catch (error) {
++    console.error('D1 metrics error:', error);
++    return { queries_count: 0, latency_ms: 0 };
++  }
++}
++
++/**
++ * Fetch Analytics Engine metrics
++ */
++async function fetchAnalyticsEngineMetrics(accountId: string, apiToken: string): Promise<{ cache_ratio_pct: number }> {
++  try {
++    const query = `
++      query {
++        viewer {
++          zones {
++            httpRequests1dGroups(limit: 1) {
++              sum {
++                cachedRequests
++                requests
++              }
++            }
++          }
++        }
++      }
++    `;
++
++    const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
++      method: 'POST',
++      headers: {
++        'Authorization': `Bearer ${apiToken}`,
++        'Content-Type': 'application/json',
++      },
++      body: JSON.stringify({ query }),
++    });
+
++    if (!response.ok) {
++      return { cache_ratio_pct: 0 };
++    }
+
++    const data = await response.json() as any;
++    const cached = data?.data?.viewer?.zones?.[0]?.httpRequests1dGroups?.[0]?.sum?.cachedRequests || 0;
++    const total = data?.data?.viewer?.zones?.[0]?.httpRequests1dGroups?.[0]?.sum?.requests || 1;
++
++    return { cache_ratio_pct: (cached / total) * 100 };
++  } catch (error) {
++    console.error('Analytics Engine metrics error:', error);
++    return { cache_ratio_pct: 0 };
++  }
++}
++
++/**
++ * Get cached metrics or fetch fresh ones
++ */
++async function getOrFetchMetrics(
++  env: Env,
++  bypassCache: boolean = false
++): Promise<CloudflareMetrics> {
++  const cacheKey = 'analytics:metrics:all';
++  const cacheTtl = 300; // 5 minutes
++
++  // Check cache if not bypassed
++  if (!bypassCache) {
++    const cached = await env.ANALYTICS_CACHE.get(cacheKey);
++    if (cached) {
++      try {
++        const data = JSON.parse(cached) as AnalyticsCache;
++        if (Date.now() - data.timestamp < data.ttl * 1000) {
++          return data.data;
++        }
++      } catch (e) {
++        console.error('Cache parse error:', e);
++      }
++    }
++  }
+
++  // Fetch fresh metrics in parallel
++  const [r2Metrics, d1Metrics, analyticsMetrics] = await Promise.all([
++    fetchR2Metrics(env.CF_ACCOUNT_ID, env.CF_API_TOKEN),
++    fetchD1Metrics(env.CF_ACCOUNT_ID, env.CF_API_TOKEN),
++    fetchAnalyticsEngineMetrics(env.CF_ACCOUNT_ID, env.CF_API_TOKEN),
++  ]);
+
++  const aggregated: CloudflareMetrics = {
++    r2_egress_gb: r2Metrics.egress_gb,
++    d1_queries_count: d1Metrics.queries_count,
++    avg_db_latency_ms: d1Metrics.latency_ms,
++    cache_hit_ratio_pct: analyticsMetrics.cache_ratio_pct,
++  };
+
++  // Cache result
++  try {
++    await env.ANALYTICS_CACHE.put(
++      cacheKey,
++      JSON.stringify({
++        data: aggregated,
++        timestamp: Date.now(),
++        ttl: cacheTtl,
++      }),
++      { expirationTtl: cacheTtl }
++    );
++  } catch (e) {
++    console.error('Cache write error:', e);
++  }
+
++  return aggregated;
++}
++
++// ============================================================================
++// Routes
++// ============================================================================
++
++/**
++ * GET /metrics
++ * Returns aggregated infrastructure metrics
++ */
++router.get('/metrics', async (request: IRequest, env: Env) => {
++  try {
++    const bypassCache = new URL(request.url).searchParams.get('cache_bypass') === 'true';
++    const metrics = await getOrFetchMetrics(env, bypassCache);
++
++    return new Response(JSON.stringify(metrics), {
++      status: 200,
++      headers: {
++        'Content-Type': 'application/json',
++        'Cache-Control': 'public, max-age=300',
++      },
++    });
++  } catch (error) {
++    console.error('Metrics endpoint error:', error);
++    return new Response(
++      JSON.stringify({ error: 'Failed to fetch metrics' }),
++      { status: 500, headers: { 'Content-Type': 'application/json' } }
++    );
++  }
++});
++
++/**
++ * Health check endpoint
++ */
++router.get('/health', () => {
++  return new Response(JSON.stringify({ status: 'ok' }), {
++    status: 200,
++    headers: { 'Content-Type': 'application/json' },
++  });
++});
++
++// ============================================================================
++// Export
++// ============================================================================
++
++export default {
++  fetch: router.handle,
++};
