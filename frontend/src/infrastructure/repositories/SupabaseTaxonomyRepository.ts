@@ -33,21 +33,21 @@ export class SupabaseTaxonomyRepository {
   }
 
   async createCategory(payload: { name: string; description?: string | null }) {
-    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'category', action: 'create', payload }) });
+    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'category', action: 'create', payload }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     return json.data;
   }
 
   async updateCategory(id: string, payload: { name: string; description?: string | null }) {
-    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'category', action: 'update', id, payload }) });
+    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'category', action: 'update', id, payload }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     return json.data;
   }
 
   async deleteCategory(id: string) {
-    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'category', action: 'delete', id }) });
+    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'category', action: 'delete', id }) });
     if (!res.ok) throw new Error('Request failed');
   }
 
@@ -65,21 +65,21 @@ export class SupabaseTaxonomyRepository {
   }
 
   async createAuthor(payload: { name: string; bio?: string | null }): Promise<any> {
-    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'author', action: 'create', payload }) });
+    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'author', action: 'create', payload }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     return json.data;
   }
 
   async updateAuthor(id: string, payload: { name: string; bio?: string | null }): Promise<any> {
-    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'author', action: 'update', id, payload }) });
+    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'author', action: 'update', id, payload }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     return json.data;
   }
 
   async deleteAuthor(id: string): Promise<void> {
-    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'author', action: 'delete', id }) });
+    const res = await fetch('/api/internal/admin/taxonomy', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entity: 'author', action: 'delete', id }) });
     if (!res.ok) throw new Error('Request failed');
   }
 }

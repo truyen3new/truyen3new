@@ -65,6 +65,8 @@ interface ProvisionedDatabase {
   name: string;
 }
 
+import { createErrorResponse, createJsonResponse, jsonHeaders } from './shared/core';
+
 const TENANT_SCHEMA_STATEMENTS = [
   "CREATE TABLE IF NOT EXISTS stories (id TEXT PRIMARY KEY, title TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', cover_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ongoing' CHECK (status IN ('ongoing', 'completed')), view_count INTEGER NOT NULL DEFAULT 0, author TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
   "CREATE INDEX IF NOT EXISTS idx_stories_slug ON stories (slug)",
@@ -79,22 +81,12 @@ const TENANT_SCHEMA_STATEMENTS = [
   "CREATE TRIGGER IF NOT EXISTS trg_chapters_sync_story_views_after_delete AFTER DELETE ON chapters BEGIN UPDATE stories SET view_count = (SELECT COALESCE(SUM(view_count), 0) FROM chapters WHERE story_id = OLD.story_id), updated_at = CURRENT_TIMESTAMP WHERE id = OLD.story_id; END",
 ];
 
-const jsonHeaders = {
-  "Content-Type": "application/json; charset=utf-8",
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type, X-Admin-Key, X-Tenant-Key",
-  "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-};
-
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body, null, 2), {
-    status,
-    headers: jsonHeaders,
-  });
+  return createJsonResponse(body, status);
 }
 
 function errorResponse(message: string, status: number, details?: unknown): Response {
-  return jsonResponse({ error: message, details }, status);
+  return createErrorResponse(message, status, details);
 }
 
 function slugify(value: string): string {

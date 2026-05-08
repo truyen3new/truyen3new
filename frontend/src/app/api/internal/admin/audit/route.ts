@@ -15,10 +15,18 @@ async function getRequester(request: NextRequest) {
     if (userError || !userId) return { ok: false };
 
     const supabase = getServerSupabase();
-    if (!supabase) return { ok: false };
-    const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).single();
-    if (!data) return { ok: false };
-    return { ok: true, id: userId, role: data.role };
+    if (supabase) {
+      const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).single();
+      if (data?.role) return { ok: true, id: userId, role: data.role };
+    }
+
+    // Fall back to app_metadata.role or user_metadata.role
+    const metadataRole = userData.user?.app_metadata?.role ?? userData.user?.user_metadata?.role;
+    if (typeof metadataRole === 'string' && metadataRole.trim()) {
+      return { ok: true, id: userId, role: metadataRole.trim() };
+    }
+
+    return { ok: false };
   } catch (e) {
     return { ok: false };
   }
@@ -59,7 +67,7 @@ export async function POST(request: NextRequest) {
     if (!supRequester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
     const supabase = getServerSupabase();
-    if (!supabase) return NextResponse.json({ error: 'server-supabase-missing' }, { status: 500 });
+    if (!supabase) return NextResponse.json({ error: 'server-supabase-missing' }, { status: 503 });
     const { error } = await supabase.from('admin_audit_logs').insert({
       actor_user_id: supRequester.id,
       action,

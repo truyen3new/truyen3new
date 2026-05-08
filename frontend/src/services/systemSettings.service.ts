@@ -81,5 +81,8 @@ export async function saveSystemSettingsSnapshot(snapshot: SystemSettingsSnapsho
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ payload }),
   });
-  if (!res.ok) throw new Error('Request failed');
+  if (!res.ok) {
+    const json = await res.json().catch(() => null);
+    throw new Error(json?.error ?? `Request failed ${res.status}`);
+  }
 }

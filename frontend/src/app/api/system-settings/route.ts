@@ -6,7 +6,7 @@ export async function GET(req: Request) {
   const keys = url.searchParams.get('keys')?.split(',') || [];
 
   const supabase = getServerSupabase();
-  if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
+  if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 503 });
 
   try {
     let query = supabase.from('site_settings').select('key,value');

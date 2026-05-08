@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
   if (!requester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const supabase = getServerSupabase();
-  if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
+  if (!supabase) return NextResponse.json({ error: 'server-supabase-missing' }, { status: 503 });
 
   const body = await request.json().catch(() => null);
   const action = body?.action;
