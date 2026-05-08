@@ -13,6 +13,7 @@ import {
   ALLOWED_AD_SETTING_KEYS,
   type AdRuntimeSettings,
 } from './adPolicy';
+import { describe, expect, it } from 'vitest';
 
 describe('adPolicy', () => {
   describe('parseAdRuntimeSettings', () => {
@@ -87,7 +88,9 @@ describe('adPolicy', () => {
     it('rejects markup with iframe tag', () => {
       const result = validateAdMarkup('<iframe src="evil.com"></iframe>', defaultRuntime);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('iframe');
+      if (!result.ok) {
+        expect(result.reason).toContain('iframe');
+      }
     });
 
     it('rejects markup with object tag', () => {
@@ -98,19 +101,25 @@ describe('adPolicy', () => {
     it('rejects markup with inline event handlers', () => {
       const result = validateAdMarkup('<div onclick="alert(1)"></div>', defaultRuntime);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('event');
+      if (!result.ok) {
+        expect(result.reason).toContain('event');
+      }
     });
 
     it('rejects markup with javascript: protocol', () => {
       const result = validateAdMarkup('<a href="javascript:void(0)">link</a>', defaultRuntime);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('javascript');
+      if (!result.ok) {
+        expect(result.reason).toContain('javascript');
+      }
     });
 
     it('rejects markup containing blocked terms', () => {
       const result = validateAdMarkup('This ad is for adult content', defaultRuntime);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('blocked terms');
+      if (!result.ok) {
+        expect(result.reason).toContain('blocked terms');
+      }
     });
 
     it('accepts markup with allowed script host', () => {
@@ -123,14 +132,18 @@ describe('adPolicy', () => {
       const markup = '<script src="https://evil.com/ads.js"></script>';
       const result = validateAdMarkup(markup, defaultRuntime);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('not allowed');
+      if (!result.ok) {
+        expect(result.reason).toContain('not allowed');
+      }
     });
 
     it('rejects markup exceeding size limit (20KB)', () => {
       const bigMarkup = 'x'.repeat(25000);
       const result = validateAdMarkup(bigMarkup, defaultRuntime);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('size limit');
+      if (!result.ok) {
+        expect(result.reason).toContain('size limit');
+      }
     });
 
     it('accepts valid Google AdSense markup', () => {
