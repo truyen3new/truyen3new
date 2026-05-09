@@ -74,6 +74,11 @@ export async function POST(request: NextRequest) {
   const requester = await getRequester(request);
   if (!requester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
+  const allowedRoles = ['admin', 'superadmin'];
+  if (!allowedRoles.includes(requester.role as string)) {
+    return NextResponse.json({ error: 'forbidden: insufficient permissions' }, { status: 403 });
+  }
+
   const supabase = getServerSupabase();
   if (!supabase) return NextResponse.json({ error: 'server-supabase-missing' }, { status: 503 });
 

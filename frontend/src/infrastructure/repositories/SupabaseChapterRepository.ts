@@ -5,6 +5,18 @@
 
 import { Chapter } from '@/types/entities';
 import { IChapterRepository } from '@/domain/interfaces';
+import { supabase } from '@/lib/supabase/client';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    if (!supabase) return {};
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token ?? null;
+    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  } catch {
+    return {};
+  }
+}
 
 export class SupabaseChapterRepository implements IChapterRepository {
   async getChapterById(id: string): Promise<Chapter | null> {
@@ -22,7 +34,8 @@ export class SupabaseChapterRepository implements IChapterRepository {
   }
 
   async saveChapter(chapter: Partial<Chapter>): Promise<Chapter> {
-    const res = await fetch('/api/internal/admin/manage-chapter', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chapter }) });
+    const authHeaders = await getAuthHeaders();
+    const res = await fetch('/api/internal/admin/manage-chapter', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ chapter }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);

@@ -56,7 +56,8 @@ export async function GET(request: NextRequest) {
     }
 
     const requester = await getRequester(request);
-    if (!requester.ok || (requester.role !== 'superadmin' && requester.role !== 'admin' && requester.role !== 'internal')) {
+    const allowedRoles = ['admin', 'superadmin'];
+    if (!requester.ok || !allowedRoles.includes(requester.role as string)) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
 
@@ -70,8 +71,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const requester = await getRequester(request);
   if (!requester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (requester.role !== 'superadmin' && requester.role !== 'admin' && requester.role !== 'internal') {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  const allowedRoles = ['admin', 'superadmin'];
+  if (!allowedRoles.includes(requester.role as string)) {
+    return NextResponse.json({ error: 'forbidden: insufficient permissions' }, { status: 403 });
   }
 
   try {

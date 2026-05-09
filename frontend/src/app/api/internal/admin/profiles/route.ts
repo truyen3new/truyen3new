@@ -95,6 +95,11 @@ export async function POST(request: NextRequest) {
   const supRequester = await getRequester(request);
   if (!supRequester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
+  const allowedRoles = ['admin', 'superadmin'];
+  if (!allowedRoles.includes(supRequester.role as string)) {
+    return NextResponse.json({ error: 'forbidden: insufficient permissions' }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const { action, id, role, full_name } = body as any;
