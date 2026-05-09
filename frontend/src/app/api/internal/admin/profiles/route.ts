@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient as createSessionClient } from '@/lib/server';
 import { getServerSupabase } from '@/lib/supabase/server';
+
+function resolveRequesterRole(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
 
 async function getRequester(request: NextRequest) {
   const internalSecret = request.headers.get('x-internal-secret');
@@ -8,7 +13,35 @@ async function getRequester(request: NextRequest) {
     return { ok: true, role: 'internal' };
   }
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const authClient =
+    supabaseUrl && supabaseKey ? createSupabaseClient(supabaseUrl, supabaseKey) : null;
+
   try {
+    const authorization = request.headers.get('authorization') ?? request.headers.get('Authorization');
+    if (authorization?.startsWith('Bearer ')) {
+      const token = authorization.slice('Bearer '.length).trim();
+      if (token && authClient) {
+        const { data: userData, error: userError } = await authClient.auth.getUser(token);
+        const userId = userData.user?.id;
+        if (userError || !userId) return { ok: false };
+
+        const supabase = getServerSupabase();
+        if (supabase) {
+          const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).single();
+          if (data?.role) return { ok: true, id: userId, role: data.role };
+        }
+
+        const metadataRole =
+          resolveRequesterRole(userData.user?.app_metadata?.role) ??
+          resolveRequesterRole(userData.user?.user_metadata?.role);
+        if (metadataRole) {
+          return { ok: true, id: userId, role: metadataRole };
+        }
+      }
+    }
+
     const sessionClient = await createSessionClient();
     const { data: userData, error: userError } = await sessionClient.auth.getUser();
     const userId = userData.user?.id;
@@ -21,9 +54,11 @@ async function getRequester(request: NextRequest) {
     }
 
     // Fall back to app_metadata.role or user_metadata.role
-    const metadataRole = userData.user?.app_metadata?.role ?? userData.user?.user_metadata?.role;
-    if (typeof metadataRole === 'string' && metadataRole.trim()) {
-      return { ok: true, id: userId, role: metadataRole.trim() };
+    const metadataRole =
+      resolveRequesterRole(userData.user?.app_metadata?.role) ??
+      resolveRequesterRole(userData.user?.user_metadata?.role);
+    if (metadataRole) {
+      return { ok: true, id: userId, role: metadataRole };
     }
 
     return { ok: false };

@@ -19,6 +19,21 @@ type StoryPageResult = {
 };
 
 export class SupabaseStoryRepository implements IStoryRepository {
+  private async getAuthHeaders(): Promise<Record<string, string>> {
+    let accessToken: string | null = null;
+
+    try {
+      if (supabase) {
+        const sessionResult = await supabase.auth.getSession();
+        accessToken = sessionResult.data.session?.access_token ?? null;
+      }
+    } catch {
+      accessToken = null;
+    }
+
+    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  }
+
   async getStories(): Promise<Story[]> {
     if (!supabase) return [];
 
@@ -58,10 +73,11 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async saveStory(story: Partial<Story>): Promise<Story> {
+    const authHeaders = await this.getAuthHeaders();
     const res = await fetch("/api/internal/admin/manage-story", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ story }),
     });
     if (!res.ok) throw new Error("Request failed");
@@ -119,10 +135,11 @@ export class SupabaseStoryRepository implements IStoryRepository {
     id: string,
     payload: Pick<Story, "title" | "description" | "status">,
   ): Promise<Story> {
+    const authHeaders = await this.getAuthHeaders();
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ action: "update", id, payload }),
     });
     if (!res.ok) throw new Error("Request failed");
@@ -132,10 +149,11 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async deleteStory(id: string): Promise<void> {
+    const authHeaders = await this.getAuthHeaders();
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ action: "delete", id }),
     });
     if (!res.ok) throw new Error("Request failed");
@@ -143,10 +161,11 @@ export class SupabaseStoryRepository implements IStoryRepository {
 
   async bulkUpdateStatus(ids: string[], status: StoryStatus): Promise<void> {
     if (ids.length === 0) return;
+    const authHeaders = await this.getAuthHeaders();
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ action: "bulkUpdateStatus", ids, status }),
     });
     if (!res.ok) throw new Error("Request failed");
@@ -154,10 +173,11 @@ export class SupabaseStoryRepository implements IStoryRepository {
 
   async bulkDeleteStories(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
+    const authHeaders = await this.getAuthHeaders();
     const res = await fetch(`/api/internal/admin/manage-story`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ action: "bulkDelete", ids }),
     });
     if (!res.ok) throw new Error("Request failed");

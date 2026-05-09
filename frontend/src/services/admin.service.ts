@@ -3,6 +3,21 @@ import { AdminDashboardQueryGateway } from '@/infrastructure/query/AdminDashboar
 
 const dashboardGateway = new AdminDashboardQueryGateway();
 
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  let accessToken: string | null = null;
+
+  try {
+    if (supabase) {
+      const sessionResult = await supabase.auth.getSession();
+      accessToken = sessionResult.data.session?.access_token ?? null;
+    }
+  } catch {
+    accessToken = null;
+  }
+
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+}
+
 export async function logDashboardAccess(actorUserId: string) {
   void actorUserId;
 }
@@ -56,9 +71,11 @@ export async function fetchProfiles() {
 }
 
 export async function updateProfileRole(id: string, role: string) {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch('/api/internal/admin/profiles', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
+    credentials: 'include',
     body: JSON.stringify({ action: 'updateRole', id, role }),
   });
   if (!res.ok) {
@@ -73,9 +90,11 @@ export async function updateProfileRole(id: string, role: string) {
 }
 
 export async function updateProfileName(id: string, full_name: string | null) {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch('/api/internal/admin/profiles', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
+    credentials: 'include',
     body: JSON.stringify({ action: 'updateName', id, full_name }),
   });
   if (!res.ok) {

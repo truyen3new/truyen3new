@@ -137,6 +137,16 @@ export const HomePage: React.FC<HomePageProps> = ({ initialStories = [] }) => {
     };
   }, [showFilter]);
 
+  const applyStoryCoverFallback = useCallback(
+    (event: React.SyntheticEvent<HTMLImageElement>, storyId: string) => {
+      const fallback = `https://picsum.photos/seed/${storyId}/400/600`;
+      if (event.currentTarget.src !== fallback) {
+        event.currentTarget.src = fallback;
+      }
+    },
+    [],
+  );
+
   return (
     <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950 transition-colors duration-500">
       <AnimatePresence>
@@ -295,6 +305,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialStories = [] }) => {
                       alt={story.title}
                       className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
                       referrerPolicy="no-referrer"
+                      onError={(event) => applyStoryCoverFallback(event, story.id)}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent opacity-90"></div>
 
@@ -395,6 +406,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialStories = [] }) => {
                       alt={story.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                       referrerPolicy="no-referrer"
+                      onError={(event) => applyStoryCoverFallback(event, story.id)}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex items-end p-3 sm:p-5">
                       <span className="text-white text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
