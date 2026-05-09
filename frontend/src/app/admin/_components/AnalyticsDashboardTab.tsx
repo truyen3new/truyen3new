@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { AlertTriangle, ArrowUpRight, CalendarRange, Cloud, Loader2, RefreshCw, ShieldCheck, Sparkles, TrendingUp } from 'lucide-react';
 import { useAnalyticsDashboard } from '@/_presenters/useAnalyticsDashboard';
+import { TrendsSection } from './TrendsSection';
 import type { AnalyticsRole, AnalyticsTimeRange, ContentPerformanceMetrics, InfrastructureMetrics, UserEngagementMetrics } from '@/types/analytics';
 import { computeStorageEfficiencyPct, formatCompactNumber, formatFixedNumber } from '@/services/analytics.service';
 
@@ -317,6 +318,14 @@ export const AnalyticsDashboardTab: React.FC<AnalyticsDashboardTabProps> = ({ ro
             <SectionShell tone="cloudflare" title="Cloudflare Infrastructure" description={isAdmin ? 'Cloudflare delivery, caching, device, and zone telemetry.' : 'Restricted view of public delivery health.'} icon={<Cloud size={18} />}>
               <InfrastructureCard data={dashboardQuery.data.infrastructure} />
             </SectionShell>
+
+            <TrendsSection
+              userGrowth={dashboardQuery.data.trends.user_growth}
+              traffic={dashboardQuery.data.trends.traffic}
+              storage={dashboardQuery.data.trends.storage}
+              infrastructure={dashboardQuery.data.infrastructure}
+              isLoading={dashboardQuery.isLoading}
+            />
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
