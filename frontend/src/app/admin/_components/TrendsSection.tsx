@@ -28,16 +28,16 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({
   ].filter(d => d.value > 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-4 py-2 text-[10px] font-black uppercase tracking-[0.32em] text-slate-200">
-          <TrendingUp size={13} /> Trends & Insights
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 sm:px-4 py-1.5 sm:py-2 text-[8px] sm:text-[10px] font-black uppercase tracking-[0.2em] sm:tracking-[0.32em] text-slate-200">
+          <TrendingUp size={12} className="flex-shrink-0" /> Trends & Insights
         </div>
       </div>
 
       {/* Trends Grid */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:gap-6 lg:grid-cols-2">
         {/* User Growth Trend */}
         <ChartContainer
           title="User Growth"
@@ -48,7 +48,7 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({
             data={userGrowth}
             title="New Users"
             color="#10b981"
-            height={280}
+            height={240}
           />
         </ChartContainer>
 
@@ -60,7 +60,7 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({
         >
           <TrafficChart
             data={traffic}
-            height={280}
+            height={240}
             fillColor="#3b82f6"
             strokeColor="#1e40af"
           />
@@ -74,7 +74,7 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({
         >
           <TrafficChart
             data={storage}
-            height={280}
+            height={240}
             fillColor="#f59e0b"
             strokeColor="#d97706"
           />
@@ -89,11 +89,11 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({
           {deviceData.length > 0 ? (
             <DeviceDistributionChart
               data={deviceData}
-              height={280}
+              height={240}
             />
           ) : (
-            <div className="flex items-center justify-center h-80 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-dashed border-slate-300 dark:border-slate-700">
-              <p className="text-sm text-slate-500">No device data available</p>
+            <div className="flex items-center justify-center h-60 sm:h-80 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-dashed border-slate-300 dark:border-slate-700">
+              <p className="text-xs sm:text-sm text-slate-500">No device data available</p>
             </div>
           )}
         </ChartContainer>
