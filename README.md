@@ -9,7 +9,7 @@ Light Story is an online reading platform with a Next.js frontend and a Supabase
   frontend/                # Next.js application (App Router)
   backend-supabase/        # Supabase config, migrations, functions, tests
   agents/                  # Local project memory, ignored by git
-  docs/                    # Architecture and release notes
+  docs/                    # Canonical architecture, testing, and setup docs
 ```
 
 ## Frontend
@@ -80,33 +80,9 @@ Comic management system with multi-chapter support and Cloudflare R2 image stora
 
 ### Architecture: MVP / Clean Separation
 
-Following **zero-leakage principle**, direct Supabase client calls (`supabase.from()`, `.rpc()`) are strictly prohibited in UI components and client services. Instead:
+The canonical layering rules and repository structure now live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-1. **View Layer** (React components in `src/pages/`, `src/components/`) — handles UI rendering only; calls presenters.
-2. **Presenter Layer** (React Query hooks in `src/_presenters/`, `src/hooks/`) — client-side data orchestration; calls server APIs via `fetch()`.
-3. **Server API Layer** (`src/app/api/**/*.ts`) — Next.js App Router routes that perform server-side Supabase queries and role verification.
-4. **Service Layer** (`src/services/**`) — optional server-side helper services (e.g., `siteMetrics.service.ts`); used by API routes, never imported into components.
-
-**Key files:**
-- `src/lib/supabase/server.ts` — lazy server Supabase client factory (avoids build-time env errors).
-- `src/app/api/stories/`, `src/app/api/chapters/`, `src/app/api/rpc/`, `src/app/api/internal/admin/` — public and internal routes (all with role checks and server supabase access).
-- `src/_presenters/useOperationsPresenter.ts`, `useAdManagerPresenter.ts` — React Query hooks for admin views.
-- `src/services/admin.service.ts` — admin client service that calls internal server routes (not direct supabase).
-
-**Internal Routes** (`src/app/api/internal/admin/**`):
-- Accept Bearer token (JWT) or `x-internal-secret` header.
-- Perform server-side role/permission checks.
-- Use service_role key for sensitive operations.
-- Examples: `/api/internal/admin/profiles` (GET/POST), `/api/internal/admin/audit` (GET/POST), `/api/internal/admin/manage-story`, `/api/internal/admin/manage-chapter`, `/api/internal/admin/taxonomy`.
-
-**Public Routes** (`src/app/api/**`):
-- RPC wrappers: `/api/rpc/increment-story-views`, `/api/rpc/like-story`, `/api/rpc/unlike-story`.
-- Data endpoints: `/api/stories`, `/api/chapters`, `/api/taxonomy/categories`, `/api/site-settings`, `/api/system-settings`, `/api/site-metrics`, `/api/role-distribution`.
-- Auth: `/api/auth/verify-recovery`.
-
-**Environmental secrets:**
-- `SUPABASE_SERVICE_ROLE_KEY` — server-only; used in server routes.
-- `INTERNAL_ADMIN_SECRET` — short secret for trusted automation endpoints.
+In short: UI components stay presentation-only, presenters orchestrate fetches, server API routes own Supabase access, and services stay server-side.
 
 ## Backend
 
@@ -198,6 +174,8 @@ npm run lint
 npm run build
 npm run ci:verify
 ```
+
+For step-by-step local testing and real-data setup, see [docs/TESTING.md](docs/TESTING.md) and [docs/REAL_DATA.md](docs/REAL_DATA.md).
 
 4. If you hit intermittent `500` with missing `.next` artifacts (for example `routes-manifest.json`), reset local cache and restart:
 
