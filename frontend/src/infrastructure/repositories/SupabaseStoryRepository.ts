@@ -6,6 +6,7 @@
 import { Story } from '@/types/entities';
 import { IStoryRepository } from '@/domain/interfaces';
 import { supabase } from '@/lib/supabase/client';
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
 
 type StoryStatus = Story['status'];
 
@@ -24,18 +25,7 @@ type StoryPageResult = {
 
 export class SupabaseStoryRepository implements IStoryRepository {
   private async getAuthHeaders(): Promise<Record<string, string>> {
-    let accessToken: string | null = null;
-
-    try {
-      if (supabase) {
-        const sessionResult = await supabase.auth.getSession();
-        accessToken = sessionResult.data.session?.access_token ?? null;
-      }
-    } catch {
-      accessToken = null;
-    }
-
-    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+    return getPrivilegedAuthHeaders();
   }
 
   async getStories(): Promise<Story[]> {

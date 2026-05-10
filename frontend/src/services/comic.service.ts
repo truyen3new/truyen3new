@@ -49,17 +49,10 @@ type ChapterCreateResponse = {
   };
 };
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  try {
-    const { supabase } = await import('@/lib/supabase/client');
-    if (!supabase) return {};
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
 
-    const sessionResult = await supabase.auth.getSession();
-    const accessToken = sessionResult.data.session?.access_token ?? null;
-    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
-  } catch {
-    return {};
-  }
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  return getPrivilegedAuthHeaders();
 }
 
 async function uploadFilesToR2(bucket: string, files: File[]): Promise<string[]> {

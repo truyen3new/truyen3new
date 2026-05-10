@@ -1,16 +1,9 @@
 import { Chapter } from '@/types/entities';
 import { IChapterRepository } from '@/types/repos';
-import { supabase } from '@/lib/supabase/client';
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  try {
-    if (!supabase) return {};
-    const sessionResult = await supabase.auth.getSession();
-    const accessToken = sessionResult.data.session?.access_token ?? null;
-    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
-  } catch {
-    return {};
-  }
+  return getPrivilegedAuthHeaders();
 }
 
 export class SupabaseChapterRepository implements IChapterRepository {

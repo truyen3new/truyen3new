@@ -1,21 +1,11 @@
 import { supabase } from '@/lib/supabase/client';
 import { AdminDashboardQueryGateway } from '@/infrastructure/query/AdminDashboardQueryGateway';
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
 
 const dashboardGateway = new AdminDashboardQueryGateway();
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  let accessToken: string | null = null;
-
-  try {
-    if (supabase) {
-      const sessionResult = await supabase.auth.getSession();
-      accessToken = sessionResult.data.session?.access_token ?? null;
-    }
-  } catch {
-    accessToken = null;
-  }
-
-  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  return getPrivilegedAuthHeaders();
 }
 
 export async function logDashboardAccess(actorUserId: string) {
@@ -116,10 +106,8 @@ export async function callManageUserFunction(body: Record<string, unknown>) {
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   try {
-    if (supabase) {
-      const sessionResult = await supabase.auth.getSession();
-      accessToken = sessionResult.data.session?.access_token ?? null;
-    }
+    const authHeaders = await getPrivilegedAuthHeaders();
+    accessToken = authHeaders.Authorization?.replace(/^Bearer\s+/i, '') ?? null;
   } catch {
     accessToken = null;
   }

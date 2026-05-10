@@ -1,40 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createSessionClient } from '@/lib/server';
+import { requireAdminAuthorization, resolveAdminRequester } from '../_auth';
 import { getServerSupabase } from '@/lib/supabase/server';
 
-async function getRequester(request: NextRequest) {
-  const internalSecret = request.headers.get('x-internal-secret');
-  if (internalSecret && process.env.INTERNAL_ADMIN_SECRET && internalSecret === process.env.INTERNAL_ADMIN_SECRET) {
-    return { ok: true, role: 'internal' };
-  }
-
-  try {
-    const sessionClient = await createSessionClient();
-    const { data: userData, error: userError } = await sessionClient.auth.getUser();
-    const userId = userData.user?.id;
-    if (userError || !userId) return { ok: false };
-
-    const supabase = getServerSupabase();
-    if (supabase) {
-      const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).single();
-      if (data?.role) return { ok: true, id: userId, role: data.role };
-    }
-
-    // Fall back to app_metadata.role or user_metadata.role
-    const metadataRole = userData.user?.app_metadata?.role ?? userData.user?.user_metadata?.role;
-    if (typeof metadataRole === 'string' && metadataRole.trim()) {
-      return { ok: true, id: userId, role: metadataRole.trim() };
-    }
-
-    return { ok: false };
-  } catch (e) {
-    return { ok: false };
-  }
-}
-
 export async function GET(request: NextRequest) {
-  const supRequester = await getRequester(request);
-  if (!supRequester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const auth = await requireAdminAuthorization(request);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);
   const limit = Number(url.searchParams.get('limit') || '200');
@@ -57,7 +27,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { action, metadata, target_user_id, target_email } = body as any;
-    const supRequester = await getRequester(request);
+    const supRequester = await resolveAdminRequester(request);
 
     // Dashboard access logging is best-effort and should not fail the request with auth noise.
     if (!supRequester.ok && action === 'dashboard_access') {
