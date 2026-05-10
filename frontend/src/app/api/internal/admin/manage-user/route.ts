@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminAuthorization } from '../_auth';
-import { getServerSupabase } from '@/lib/supabase/server';
+import { getServerSupabaseForRequest, hasServerSupabaseServiceRoleKey } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   const auth = await requireAdminAuthorization(request);
@@ -8,7 +8,17 @@ export async function POST(request: NextRequest) {
 
   const requester = auth.requester;
 
-  const supabase = getServerSupabase();
+  if (requester.role === 'internal' && !hasServerSupabaseServiceRoleKey()) {
+    return NextResponse.json(
+      {
+        error:
+          'internal-secret manage-user actions require SUPABASE_SERVICE_ROLE_KEY (sb_service_role_*). Current configuration only has publishable/anon key.',
+      },
+      { status: 503 },
+    );
+  }
+
+  const supabase = getServerSupabaseForRequest(request);
   if (!supabase) return NextResponse.json({ error: 'server-supabase-missing' }, { status: 503 });
 
   const body = await request.json().catch(() => null);

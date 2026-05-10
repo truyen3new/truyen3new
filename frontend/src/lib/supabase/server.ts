@@ -1,43 +1,18 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let _client: SupabaseClient | null = null;
+let _clientSignature: string | null = null;
 
-function createMockSupabaseClient(): SupabaseClient {
-  const makeChain = () => {
-    const chain: any = {
-      select: () => chain,
-      in: () => chain,
-      eq: () => chain,
-      or: () => chain,
-      order: () => chain,
-      range: () => chain,
-      limit: () => chain,
-      single: async () => ({ data: null, error: null }),
-      maybeSingle: async () => ({ data: null, error: null }),
-      insert: () => chain,
-      update: () => chain,
-      delete: () => chain,
-      upsert: () => chain,
-      rpc: async () => ({ data: null, error: null }),
-      then: (resolve: (value: any) => any) => Promise.resolve(resolve({ data: null, error: null })),
-    };
-    return chain;
-  };
+type SupabaseServerConfig = {
+  url: string | undefined;
+  publicKey: string | undefined;
+  hasServiceKey: boolean;
+  isPlaceholderKey: boolean;
+  selectedKey: string | undefined;
+  signature: string;
+};
 
-  const mock: any = {
-    from: () => makeChain(),
-    auth: {
-      getUser: async () => ({ data: { user: null }, error: null }),
-      getSession: async () => ({ data: { session: null }, error: null }),
-    },
-    rpc: async () => ({ data: null, error: null }),
-  };
-
-  return mock as SupabaseClient;
-}
-
-export function getServerSupabase(): SupabaseClient | null {
-  if (_client) return _client;
+function getSupabaseServerConfig(): SupabaseServerConfig {
   const SUPABASE_URL =
     process.env.SUPABASE_URL ||
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -46,6 +21,9 @@ export function getServerSupabase(): SupabaseClient | null {
 
   const SUPABASE_PUBLIC_KEY =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
     process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
   const SUPABASE_SERVICE_ROLE_KEY =
@@ -53,50 +31,98 @@ export function getServerSupabase(): SupabaseClient | null {
     process.env.SUPABASE_SERVICE_KEY ||
     process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
-  // Re-evaluate key after attempting to load repo .env.
   const resolvedServiceKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SUPABASE_SERVICE_KEY ||
     process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
     SUPABASE_SERVICE_ROLE_KEY;
 
-  // Treat obvious placeholder/emulator or publishable values as not configured.
   const serviceKeyLower = (resolvedServiceKey || '').toLowerCase();
   const isPlaceholderKey = /placeholder|emulator|publishable|sb_publishable_|anon_|service-role-key|change-me|your-service-key|^test-/i.test(serviceKeyLower);
+  const hasServiceKey = Boolean(resolvedServiceKey) && !isPlaceholderKey;
+  const selectedKey = hasServiceKey ? (resolvedServiceKey as string) : SUPABASE_PUBLIC_KEY;
+  const keyKind = hasServiceKey ? 'service' : 'publishable';
+  const signature = `${SUPABASE_URL || 'missing-url'}|${keyKind}|${selectedKey ? selectedKey.slice(0, 12) : 'missing-key'}`;
 
-  if (!SUPABASE_URL || !SUPABASE_PUBLIC_KEY) {
+  return {
+    url: SUPABASE_URL,
+    publicKey: SUPABASE_PUBLIC_KEY,
+    hasServiceKey,
+    isPlaceholderKey,
+    selectedKey,
+    signature,
+  };
+}
+
+export function getServerSupabase(): SupabaseClient | null {
+  const config = getSupabaseServerConfig();
+
+  if (_client && _clientSignature === config.signature) {
+    return _client;
+  }
+
+  if (!config.url || !config.publicKey) {
     // Do not throw at import-time; return null so callers can handle missing config during build/dev.
     // eslint-disable-next-line no-console
     const envKeys = Object.keys(process.env).filter((k) => /SUPABASE|VITE|NEXT_PUBLIC/i.test(k));
     console.warn('frontend: server supabase client missing env vars', {
-      hasUrl: !!SUPABASE_URL,
-      hasPublicKey: !!SUPABASE_PUBLIC_KEY,
-      hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY,
-      isPlaceholderKey,
+      hasUrl: !!config.url,
+      hasPublicKey: !!config.publicKey,
+      hasServiceKey: config.hasServiceKey,
+      isPlaceholderKey: config.isPlaceholderKey,
       foundEnvKeys: envKeys,
     });
-
-    _client = createMockSupabaseClient();
-    return _client;
+    _client = null;
+    _clientSignature = null;
+    return null;
   }
 
-  if (!resolvedServiceKey || isPlaceholderKey) {
+  if (!config.hasServiceKey) {
     // eslint-disable-next-line no-console
     const envKeys = Object.keys(process.env).filter((k) => /SUPABASE|VITE|NEXT_PUBLIC/i.test(k));
-    console.warn('frontend: server supabase client using mock fallback because service role key is missing or placeholder', {
-      hasUrl: !!SUPABASE_URL,
-      hasPublicKey: !!SUPABASE_PUBLIC_KEY,
-      hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY,
-      isPlaceholderKey,
+    console.warn('frontend: server supabase client using publishable key fallback because service role key is missing or placeholder', {
+      hasUrl: !!config.url,
+      hasPublicKey: !!config.publicKey,
+      hasServiceKey: config.hasServiceKey,
+      isPlaceholderKey: config.isPlaceholderKey,
       foundEnvKeys: envKeys,
     });
-
-    _client = createMockSupabaseClient();
-    return _client;
   }
 
-  _client = createClient(SUPABASE_URL, resolvedServiceKey as string, { auth: { persistSession: false } });
+  _client = createClient(config.url, config.selectedKey as string, { auth: { persistSession: false } });
+  _clientSignature = config.signature;
   return _client;
+}
+
+export function getServerSupabaseForRequest(request: { headers: { get(name: string): string | null } }): SupabaseClient | null {
+  const config = getSupabaseServerConfig();
+  if (!config.url || !config.publicKey) return null;
+
+  if (config.hasServiceKey) {
+    return getServerSupabase();
+  }
+
+  const authorization = request.headers.get('authorization') ?? request.headers.get('Authorization');
+  if (!authorization?.startsWith('Bearer ')) {
+    return getServerSupabase();
+  }
+
+  return createClient(config.url, config.publicKey, {
+    global: {
+      headers: {
+        Authorization: authorization,
+      },
+    },
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+export function hasServerSupabaseServiceRoleKey(): boolean {
+  return getSupabaseServerConfig().hasServiceKey;
 }
 
 export default getServerSupabase;

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminAuthorization } from '../_auth';
-import { getServerSupabase } from '@/lib/supabase/server';
+import { getServerSupabaseForRequest, hasServerSupabaseServiceRoleKey } from '@/lib/supabase/server';
 
 export async function GET(req: NextRequest) {
   const auth = await requireAdminAuthorization(req);
   if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabase();
+  const supabase = getServerSupabaseForRequest(req);
   if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
 
   const type = req.nextUrl.searchParams.get('type');
@@ -25,7 +25,17 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ error: 'type param required' }, { status: 400 });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || String(e) }, { status: 500 });
+    const message = e?.message || String(e);
+    if (/row-level security policy/i.test(message)) {
+      return NextResponse.json(
+        {
+          error:
+            'forbidden: RLS blocked this write. Sign in as an admin so a bearer token is forwarded, or configure SUPABASE_SERVICE_ROLE_KEY for internal-secret writes.',
+        },
+        { status: 403 },
+      );
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -33,7 +43,17 @@ export async function POST(req: NextRequest) {
   const auth = await requireAdminAuthorization(req);
   if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabase();
+  if (auth.requester.role === 'internal' && !hasServerSupabaseServiceRoleKey()) {
+    return NextResponse.json(
+      {
+        error:
+          'internal-secret writes require SUPABASE_SERVICE_ROLE_KEY (sb_service_role_*). Current configuration only has publishable/anon key.',
+      },
+      { status: 503 },
+    );
+  }
+
+  const supabase = getServerSupabaseForRequest(req);
   if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
   const body = await req.json();
   const { entity, action, id, payload } = body;
