@@ -1,249 +1,70 @@
 # Light Story
 
-Light Story is an online reading platform with a Next.js frontend and a Supabase backend.
+Light Story is an online reading platform with a Next.js frontend, Supabase backend, and a Cloudflare Workers D1 backend. Includes a comic platform with semantic search, VIP content gating, and real-time updates.
+
+## Quick Links
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Testing](docs/TESTING.md)
+- [Real Data Setup](docs/REAL_DATA.md)
+- [Staging Runbook](docs/STAGING_RUNBOOK.md)
+- [Frontend Architecture](frontend/ARCHITECTURE.md)
+- [Backend Analytics Setup](backend-supabase/docs/ANALYTICS_WORKER_SETUP.md)
+
+### Comic Platform (New)
+
+- [Comic Platform Deployment](docs/STAGING_DEPLOYMENT_COMIC_PLATFORM.md)
+- [Edge Function Setup](docs/DEPLOY_EDGE_FUNCTIONS.md)
+- [R2 Worker Setup](docs/DEPLOY_R2_WORKER.md)
+- [Cloudflare R2 Integration](docs/CLOUDFLARE_R2_DEPLOYMENT.md)
+- [Database Schema](backend-supabase/docs/db-schema.md)
+- [Test Suite](backend-supabase/supabase/tests/README.md)
 
 ## Repository Layout
 
 ```text
-/
-  frontend/                # Next.js application (App Router)
-  backend-supabase/        # Supabase config, migrations, functions, tests
-  agents/                  # Local project memory, ignored by git
-  docs/                    # Canonical architecture, testing, and setup docs
+frontend/          Next.js application
+backend-supabase/  Supabase migrations, functions, tests, and docs
+backend-d1-saas/   Cloudflare Workers D1 backend
+docs/              Canonical architecture, testing, setup, and archive docs
+scripts/           Root helper scripts
+src/               Shared root-level code
+workers/           Cloudflare Workers (R2 proxy, etc)
 ```
 
-## Frontend
+## Local Development
 
-Location: `frontend/`
-
-Main scripts:
+From the repository root:
 
 ```bash
-npm install
-npm run dev
-npm run build
-npm run lint
-npm run ci:verify
-```
-
-Environment variables:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
-CLOUDFLARE_ANALYTICS_WORKER_URL=your_analytics_worker_url
-
-# Server-side (do NOT expose these in the browser):
-# `SUPABASE_SERVICE_ROLE_KEY` — Supabase service_role key used by server internal routes/functions.
-# `INTERNAL_ADMIN_SECRET` — short, high-entropy secret to allow trusted internal requests.
-```
-
-Use `NEXT_PUBLIC_*` keys for frontend runtime configuration.
-
-### Authentication & Access
-
-- Sign in with password, Google OAuth, and email magic link.
-- User self-registration with email verification.
-- Dedicated password reset flow via `/auth/reset-password`.
-- Role-based admin access for `superadmin`, `admin`, and `employee` with route guards.
-- Admin user-role operations are hardened to prevent unsafe role transitions and self-role edits.
-
-### Admin Operations
-
-- Operations center for core content, user, commerce, analytics, and system workflows.
-- Operations data tab to validate backend admin tables and row counts in real time.
-- Menu visibility controls for role-based sidebar configuration.
-- System settings backup and restore for the settings surface managed in the UI.
-
-### Comic Management (New)
-
-Comic management system with multi-chapter support and Cloudflare R2 image storage:
-
-**Features:**
-- Create comics with metadata and cover image upload to R2
-- Add chapters with ordered multi-image uploads (1→2→...→end)
-- Row-level security enforcing owner-only CRUD operations
-- Numeric image ordering UI with move/remove controls
-- Dashboard integration with role-based access
-
-**Backend:**
-- Tables: `comics` (id, owner_id, title, description, cover_url), `chapters` (id, comic_id, chapter_number, title, content), `chapter_images` (id, chapter_id, image_url)
-- RLS policies: owners can only create/modify their own comics and chapters
-- Edge functions:
-  - `create_comic` — validates bearer token, inserts comic with owner_id set from JWT
-  - `upload_to_r2` — handles multi-file uploads to Cloudflare R2, returns public URLs
-
-**Frontend:**
-- Pages: `frontend/src/app/comics/create/page.tsx`, `frontend/src/app/comics/[comicId]/add-chapter/page.tsx`
-- Dashboard tabs: accessible from admin menu when user has creator role
-- Tailwind-styled responsive UI with file preview and drag-reorder support
-
-### Architecture: MVP / Clean Separation
-
-The canonical layering rules and repository structure now live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-In short: UI components stay presentation-only, presenters orchestrate fetches, server API routes own Supabase access, and services stay server-side.
-
-## Backend
-
-Location: `backend-supabase/supabase/`
-
-Contains:
-
-- `migrations/` for versioned SQL
-- `functions/` for Edge Functions
-- `tests/` for SQL smoke checks
-- `config.toml` for local Supabase settings
-
-## Cloudflare SaaS Backend
-
-Location: `backend-d1-saas/`
-
-Contains a standalone Cloudflare Workers backend that provisions one D1 database per tenant and keeps the tenant registry in a control-plane D1 database.
-
-Current baseline migration:
-
-- `backend-supabase/supabase/migrations/202604200001_mvp_init.sql`
-
-Recent operations migration:
-
-- `backend-supabase/supabase/migrations/20260421074259_admin_operations_schema.sql`
-  - Adds collections, moderation queue, crawler sources/runs, VIP plans/subscriptions,
-    promotions/events, transactions, comments/ratings, and revenue snapshots.
-
-Suggested verification scope:
-
-- `backend-supabase/supabase/tests/rls_smoke.sql`
-- `backend-supabase/supabase/tests/rpc_smoke.sql`
-
-## Security & Performance Updates (April 2026)
-
-Recent comprehensive audit identified and resolved 10 critical security, performance, and reliability issues:
-
-### Database & Security (3 items)
-
-1. **RLS Policy Hardening** - Fixed critical "select true" leak on site_settings that exposed ad keys and sensitive config to unauthenticated users. Now requires authentication with restricted "public_*" key access.
-2. **View Count Race Condition** - Replaced simple UPDATE with idempotent RPC using story_views tracking table, preventing duplicate increments under high concurrency.
-3. **Profile Role Escalation Prevention** - Verified and maintained trigger-based protection preventing unauthorized role changes; only superadmin can modify user roles.
-
-### Frontend Performance (3 items)
-
-4. **Ad Injection Optimization** - Deferred ad script injection using requestIdleCallback (fallback setTimeout) to prevent main thread blocking and improve Lighthouse scores.
-5. **Bundle Size Reduction** - Implemented dynamic imports for admin dashboard; non-admin users no longer download admin code (~13KB saved).
-6. **Dark Mode FOUC Prevention** - Applied blocking script pattern + useLayoutEffect to eliminate white flash on load by applying theme before React hydrates.
-
-### Error Handling & UX (4 items)
-
-7. **Global Error Handling** - Added useGlobalErrorHandler hook and GlobalErrorHandler component to catch unhandled promise rejections and surface Supabase errors via toast UI.
-8. **Chapter Draft Auto-Save** - Implemented useAutoSave hook with 3-second debounced localStorage backup; unsaved work persists across session expiry and tab crashes.
-9. **Client-Side RBAC Audit** - Created RLS audit migration verifying all admin tables enforce role-based access; client-side protections are supplementary only.
-10. **Optimistic Updates Foundation** - Created useOptimisticUpdate hook enabling snappier UI feedback for likes/views; integration examples in `frontend/src/examples/OptimisticUpdateExample.tsx`.
-
-**Commits**: 935242d, a99a3cf (completed April 28, 2026)
-
-### Usage Notes
-- Optimistic updates are ready for integration via `useStoryMutations` hook
-- Auto-save recovery automatically triggers on page reload with user notification
-- Theme blocking script runs before React initialization; check suppressHydrationWarning in html tag if troubleshooting
-- RLS audit migration can be run manually: `SELECT * FROM app_private.check_rls_policies();`
-
-
-## Local Setup
-
-1. Install frontend dependencies:
-
-```bash
-cd frontend
-npm install
-```
-
-2. Run the app locally:
-
-```bash
-npm run dev
-```
-
-Default dev server runs on `http://localhost:3001`.
-
-You can run this from the repository root with `npm --prefix frontend run dev` or directly inside `frontend/`.
-
-3. Build and type-check the frontend before shipping:
-
-```bash
-npm run lint
-npm run build
-npm run ci:verify
-```
-
-For step-by-step local testing and real-data setup, see [docs/TESTING.md](docs/TESTING.md) and [docs/REAL_DATA.md](docs/REAL_DATA.md).
-
-4. If you hit intermittent `500` with missing `.next` artifacts (for example `routes-manifest.json`), reset local cache and restart:
-
-```bash
-taskkill /F /IM node.exe
-rm -r frontend/.next
+npm --prefix frontend install
 npm --prefix frontend run dev
+npm --prefix frontend run build
 ```
 
-## Supabase Sync
+For backend validation, use the package-specific commands documented in [docs/TESTING.md](docs/TESTING.md).
 
-Use the Supabase CLI from `backend-supabase/`:
+## Comic Platform Features
 
-```bash
-supabase login
-supabase link --project-ref <project-ref>
-supabase db push
-supabase functions deploy increment-story-views
-supabase functions deploy manage-story
-supabase functions deploy manage-chapter
-```
+- **Semantic Search**: Vector-based search using pgvector (1536-dimensional embeddings)
+- **VIP Content Gating**: Row-level security policies protect premium chapters
+- **Real-time Updates**: Supabase Realtime subscriptions for live chapter changes
+- **Edge Functions**: Serverless webhooks for payments and rewards
+- **Asset Proxy**: Cloudflare R2 with JWT-based access control
+- **Role-based Access**: Admin panel for content management
 
-## Deployment & Internal API notes
+## Runtime Notes
 
-- The frontend exposes internal server routes under `/api/internal/admin/*` that must be protected in production.
-- Set `SUPABASE_SERVICE_ROLE_KEY` and `INTERNAL_ADMIN_SECRET` in the deployment environment before enabling admin features.
-- Recommended workflow:
-  1. Add `SUPABASE_SERVICE_ROLE_KEY` and `INTERNAL_ADMIN_SECRET` to your hosting provider's secret store (Vercel/Netlify/Cloud run env vars).
-  2. Ensure only server-side code reads `SUPABASE_SERVICE_ROLE_KEY`; never surface this key to the browser.
-  3. The internal routes support two auth paths:
-     - Bearer JWT: client sends `Authorization: Bearer <access_token>`; server verifies token and profile role using the service role client.
-     - Internal secret: send `x-internal-secret: <INTERNAL_ADMIN_SECRET>` from trusted internal services for automation.
-  4. Audit access logs and rotate `INTERNAL_ADMIN_SECRET` regularly.
+- Use `NEXT_PUBLIC_*` variables in the browser.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` and `INTERNAL_ADMIN_SECRET` server-side only.
+- Internal admin routes live under `/api/internal/admin/*`.
+- Comic platform uses `search_stories()` RPC and `chapters` realtime subscriptions.
 
-### Testing internal routes locally
+## Canonical Docs
 
-To validate the internal admin endpoints return the expected authorization responses during local development, run the dev server and the included smoke test:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/TESTING.md](docs/TESTING.md)
+- [docs/REAL_DATA.md](docs/REAL_DATA.md)
+- [docs/ARCHIVE/README.md](docs/ARCHIVE/README.md)
 
-```bash
-# from repo root
-npm --prefix frontend run dev
-# in another shell (no secrets set)
-npm --prefix frontend run test:internal-auth
-```
-
-If you need to run the smoke test with service-role credentials, set `SUPABASE_SERVICE_ROLE_KEY` in your `.env.local` (do not commit it) and re-run the test to exercise server-side behavior.
-
-### Replacing client Edge Function calls
-
-- The previous client call to the `manage-user` Edge Function has been replaced by a proxied internal endpoint at `/api/internal/admin/manage-user` that performs server-side role checks and calls Supabase admin APIs using the service role key.
-- If you deploy the backend Edge Function `manage-user`, it can remain as a fallback for external integrations, but the frontend now prefers the internal route for admin actions.
-
-The linked project in this workspace is `rwnzsmmfvsetfcnkjoxt`.
-
-## CI
-
-The repository uses GitHub Actions to:
-
-- clean Next cache, then run frontend `ci:verify` (type-check + build)
-- validate backend file structure
-- open an automatic pull request for non-main pushes after CI succeeds
-
-## Contributing
-
-Contributor workflow and PR guidance live in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Notes
-
-- `agents/` is intentionally git-ignored for local project memory.
-- Legacy SQL files at the repository root are retained for reference during transition.
 

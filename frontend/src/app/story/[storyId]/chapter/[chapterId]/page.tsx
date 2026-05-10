@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ChevronLeft, Info } from "lucide-react";
 
 import { useChapterDetail } from "@/hooks/useChapterDetail";
+import useChapterSubscription from "@/hooks/useChapterSubscription";
 
 export default function ChapterReaderPage() {
   const params = useParams();
@@ -15,6 +16,17 @@ export default function ChapterReaderPage() {
   const chapterId = params.chapterId as string;
 
   const { data: chapter, isLoading, error } = useChapterDetail(chapterId);
+  const [realtimeChapter, setRealtimeChapter] = useState(chapter);
+
+  // Subscribe to realtime chapter updates
+  useChapterSubscription(storyId, (updatedChapter) => {
+    if (updatedChapter?.id === chapterId) {
+      setRealtimeChapter(updatedChapter);
+    }
+  });
+
+  // Use realtime-updated chapter if available, otherwise use fetched data
+  const displayChapter = realtimeChapter || chapter;
 
   useEffect(() => {
     document.documentElement.style.scrollBehavior = "smooth";
@@ -52,7 +64,7 @@ export default function ChapterReaderPage() {
     );
   }
 
-  const images: string[] = chapter.image_urls || chapter.images || [];
+  const images: string[] = displayChapter?.image_urls || displayChapter?.images || [];
 
   return (
     <div className="min-h-screen bg-zinc-950 pb-20">
@@ -66,7 +78,7 @@ export default function ChapterReaderPage() {
           </button>
           <div className="text-center flex-1 truncate px-4">
             <h1 className="text-base font-bold text-white truncate">
-              {chapter.title || `Chương ${chapter.chapter_number}`}
+              {displayChapter?.title || `Chương ${displayChapter?.chapter_number}`}
             </h1>
           </div>
           <button className="p-2 text-slate-300 hover:text-white">

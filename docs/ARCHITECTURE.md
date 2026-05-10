@@ -35,6 +35,42 @@ This is the canonical repository-wide reference for how Light Story code is orga
 - `backend-supabase/docs` captures database and policy notes.
 - `backend-supabase/workers/analytics-aggregator.ts` is the Cloudflare Worker that powers the analytics dashboard's infrastructure metrics endpoint.
 
+### Comic Platform (New)
+
+- **Migration**: `backend-supabase/supabase/migrations/202605100001_comic_platform.sql`
+  - Core schema: `stories`, `chapters` with pgvector embeddings (1536-dim)
+  - RLS policies: `read_published_stories`, `read_free_chapters`, `read_vip_chapters_premium_admin`
+  - Search RPC: `search_stories(query_embedding, match_count)`
+  - Index: `idx_stories_search_vector` using ivfflat
+
+- **Edge Function**: `backend-supabase/supabase/functions/payment_and_rewards/index.ts`
+  - Handles `payment_webhook` and `daily_checkin` events
+  - RPC calls to grant rewards and record payments
+  - Minimal JSON parsing with defensive error handling
+
+- **R2 Worker**: `workers/r2-signed-url/worker.js`
+  - JWT-based asset access control
+  - Role check: `premium` and `admin` bypass VIP gating
+  - Cache headers: `private` for VIP, `public` for public assets
+  - Signature validation for webhook payloads
+
+- **Embedding Backfill**: `backend-supabase/supabase/scripts/backfill_embeddings.js`
+  - Batch embedding generation using OpenAI API (optional)
+  - Upserts embeddings via Supabase service role
+  - Continues until all rows processed
+
+- **Tests**: `backend-supabase/supabase/tests/`
+  - `rls-policies.test.sql`: RLS policy validation
+  - `payment_and_rewards.test.ts`: Edge Function handler tests
+  - `worker.test.js`: R2 Worker JWT and gating tests
+
+### Cloudflare Workers (R2 Asset Proxy)
+
+- `workers/r2-signed-url/` handles asset gating and caching
+- JWT payload includes role for authorization decisions
+- Edge-cached responses minimize origin load
+
+
 ## Standard Practices
 
 - New features start as a use case, not as direct route logic.
