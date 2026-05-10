@@ -79,6 +79,7 @@ export async function saveSystemSettingsSnapshot(snapshot: SystemSettingsSnapsho
   const res = await fetch('/api/system-settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // Include cookies for session-based auth
     body: JSON.stringify({ payload }),
   });
   if (!res.ok) {

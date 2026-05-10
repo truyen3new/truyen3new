@@ -26,7 +26,10 @@ export async function POST(req: NextRequest) {
   const supabase = getServerSupabase();
   if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
 
-  const auth = await requireRouteAuthorization(req, { allowedRoles: ['admin', 'superadmin', 'internal'] });
+  const auth = await requireRouteAuthorization(req, { 
+    allowedRoles: ['admin', 'superadmin', 'internal'],
+    unauthorizedMessage: 'Authentication required. Ensure Authorization header with valid token or x-internal-secret is provided.',
+  });
   if (!auth.ok) return auth.response;
 
   const body = await req.json();

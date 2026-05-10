@@ -35,14 +35,24 @@ async function resolveRole(
   userId: string,
   userData: any,
 ): Promise<string | undefined> {
-  const supabase = getServerSupabaseForRequest(request) ?? getServerSupabase();
-  if (supabase) {
-    const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).maybeSingle();
-    const profileRole = resolveRequesterRole(data?.role);
-    if (profileRole) return profileRole;
+  // First try to get role from app_metadata (fastest, no DB query)
+  const appMetadataRole = resolveRequesterRole(userData.user?.app_metadata?.role);
+  if (appMetadataRole) return appMetadataRole;
+
+  // Fall back to profiles table if no app_metadata role
+  try {
+    const supabase = getServerSupabaseForRequest(request) ?? getServerSupabase();
+    if (supabase) {
+      const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).maybeSingle();
+      const profileRole = resolveRequesterRole(data?.role);
+      if (profileRole) return profileRole;
+    }
+  } catch (err) {
+    // If profiles query fails, continue with other methods
+    console.warn('Failed to resolve role from profiles table:', err);
   }
 
-  return resolveRequesterRole(userData.user?.app_metadata?.role);
+  return undefined;
 }
 
 async function tryBearerRequester(request: NextRequest): Promise<RouteRequester | null> {
