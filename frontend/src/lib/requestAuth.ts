@@ -33,5 +33,10 @@ function getInternalSecretHeader(): Record<string, string> {
 // Exported helper that callers can use to include both auth and optional internal secret.
 export async function getPrivilegedAuthHeadersWithInternal(): Promise<Record<string, string>> {
   const headers = await getPrivilegedAuthHeaders().catch(() => ({}));
+  // Prefer an actual bearer token when present. Only include the client-exposed
+  // `x-internal-secret` fallback when no bearer token is available. This avoids
+  // triggering the server-side "internal" flow (which requires a service-role
+  // key) when the user is already signed in as an admin.
+  if (headers.Authorization) return headers;
   return { ...headers, ...getInternalSecretHeader() };
 }

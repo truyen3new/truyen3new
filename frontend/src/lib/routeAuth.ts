@@ -1,7 +1,7 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createSessionClient } from '@/lib/server';
-import { getServerSupabase } from '@/lib/supabase/server';
+import { getServerSupabase, getServerSupabaseForRequest } from '@/lib/supabase/server';
 
 export type RouteRequester =
   | { ok: true; id: string; role: string }
@@ -30,8 +30,12 @@ function createErrorResponse(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-async function resolveRole(userId: string, userData: any): Promise<string | undefined> {
-  const supabase = getServerSupabase();
+async function resolveRole(
+  request: NextRequest | { headers: { get(name: string): string | null } },
+  userId: string,
+  userData: any,
+): Promise<string | undefined> {
+  const supabase = getServerSupabaseForRequest(request) ?? getServerSupabase();
   if (supabase) {
     const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).maybeSingle();
     const profileRole = resolveRequesterRole(data?.role);
@@ -56,19 +60,19 @@ async function tryBearerRequester(request: NextRequest): Promise<RouteRequester 
   const userId = userData.user?.id;
   if (userError || !userId) return null;
 
-  const role = await resolveRole(userId, userData);
+  const role = await resolveRole(request, userId, userData);
   if (!role) return null;
 
   return { ok: true, id: userId, role };
 }
 
-async function trySessionRequester(): Promise<RouteRequester | null> {
+async function trySessionRequester(request: NextRequest): Promise<RouteRequester | null> {
   const sessionClient = await createSessionClient();
   const { data: userData, error: userError } = await sessionClient.auth.getUser();
   const userId = userData.user?.id;
   if (userError || !userId) return null;
 
-  const role = await resolveRole(userId, userData);
+  const role = await resolveRole(request, userId, userData);
   if (!role) return null;
 
   return { ok: true, id: userId, role };
@@ -91,7 +95,7 @@ export async function resolveRouteRequester(
     const bearerRequester = await tryBearerRequester(request);
     if (bearerRequester?.ok) return bearerRequester;
 
-    const sessionRequester = await trySessionRequester();
+    const sessionRequester = await trySessionRequester(request);
     if (sessionRequester?.ok) return sessionRequester;
 
     if (options.allowAnonymousFallback) {
