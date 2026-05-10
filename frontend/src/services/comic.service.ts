@@ -49,6 +49,12 @@ type ChapterCreateResponse = {
   };
 };
 
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  return getPrivilegedAuthHeaders();
+}
+
 async function uploadFilesToR2(bucket: string, files: File[]): Promise<string[]> {
   const allowDevFallback = process.env.NEXT_PUBLIC_ENABLE_LOCAL_DEV_FALLBACK === "true";
 
@@ -69,12 +75,14 @@ async function uploadFilesToR2(bucket: string, files: File[]): Promise<string[]>
 
   const form = new FormData();
   files.forEach((file) => form.append("file", file));
+  const authHeaders = await getAuthHeaders();
 
   try {
     const response = await fetch("/api/internal/admin/upload-to-r2", {
       method: "POST",
       headers: {
         "x-r2-bucket": bucket,
+        ...authHeaders,
       },
       body: form,
     });
@@ -185,9 +193,10 @@ export function listComicContexts(): ComicContext[] {
 }
 
 export async function createComic(input: CreateComicInput): Promise<ComicContext> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch("/api/internal/admin/comics", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({
       title: input.title,
       description: input.description,
@@ -211,9 +220,10 @@ export async function createComic(input: CreateComicInput): Promise<ComicContext
 }
 
 export async function createComicChapter(input: ChapterCreateInput): Promise<ChapterCreateResponse["chapter"]> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(`/api/internal/admin/comics/${input.comicId}/chapters`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({
       storyId: input.storyId,
       tenantKey: input.tenantKey,

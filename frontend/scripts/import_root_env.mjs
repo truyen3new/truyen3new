@@ -35,6 +35,10 @@ for (const l of lines) {
   entries[m[1]] = m[2];
 }
 
+function isValidServiceRoleKey(value) {
+  return typeof value === 'string' && /^sb_service_role_/i.test(value.trim());
+}
+
 let existing = {};
 if (fs.existsSync(targetEnv)) {
   const cur = fs.readFileSync(targetEnv, 'utf8').split(/\r?\n/).filter(Boolean);
@@ -48,6 +52,7 @@ if (fs.existsSync(targetEnv)) {
 const keysToCopy = [
   'NEXT_PUBLIC_SUPABASE_URL',
   'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_PUBLISHABLE_KEY',
   'SUPABASE_URL',
@@ -63,7 +68,14 @@ const keysToCopy = [
   'NEXT_PUBLIC_ENABLE_LOCAL_DEV_FALLBACK',
 ];
 for (const k of keysToCopy) {
-  if (entries[k]) existing[k] = entries[k];
+  if (!entries[k]) continue;
+
+  if (k === 'SUPABASE_SERVICE_ROLE_KEY' && !isValidServiceRoleKey(entries[k])) {
+    // Prevent propagating publishable/placeholder values into service-role key.
+    continue;
+  }
+
+  existing[k] = entries[k];
 }
 
 const out = Object.entries(existing).map(([k,v]) => `${k}=${v}`);

@@ -5,6 +5,11 @@
 
 import { Chapter } from '@/types/entities';
 import { IChapterRepository } from '@/domain/interfaces';
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  return getPrivilegedAuthHeaders();
+}
 
 export class SupabaseChapterRepository implements IChapterRepository {
   async getChapterById(id: string): Promise<Chapter | null> {
@@ -22,7 +27,8 @@ export class SupabaseChapterRepository implements IChapterRepository {
   }
 
   async saveChapter(chapter: Partial<Chapter>): Promise<Chapter> {
-    const res = await fetch('/api/internal/admin/manage-chapter', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chapter }) });
+    const authHeaders = await getAuthHeaders();
+    const res = await fetch('/api/internal/admin/manage-chapter', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ chapter }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);

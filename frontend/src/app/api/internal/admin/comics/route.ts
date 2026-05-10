@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdminAuthorization } from "../_auth";
 
 function slugify(value: string): string {
   return value
@@ -17,7 +18,12 @@ async function readJsonBody<T>(request: Request): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const auth = await requireAdminAuthorization(request);
+  if (!auth.ok) return auth.response;
+
+  const requester = auth.requester;
+
   const backendUrl = process.env.BACKEND_D1_SAAS_URL;
   const backendAdminKey = process.env.BACKEND_D1_SAAS_ADMIN_KEY;
   const allowDevFallback = process.env.ENABLE_LOCAL_DEV_FALLBACK === "true";
@@ -28,6 +34,10 @@ export async function POST(request: Request) {
   const isBackendConfigured = Boolean(backendUrl && backendAdminKey);
   if (!isBackendConfigured && (process.env.NODE_ENV === "production" || !allowDevFallback)) {
     return NextResponse.json({ error: "D1 SaaS backend is not configured" }, { status: 500 });
+  }
+
+  if (!requester.role) {
+    return NextResponse.json({ error: "forbidden: insufficient permissions" }, { status: 403 });
   }
 
   try {

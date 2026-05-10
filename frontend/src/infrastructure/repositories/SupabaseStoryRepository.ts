@@ -6,6 +6,7 @@
 import { Story } from '@/types/entities';
 import { IStoryRepository } from '@/domain/interfaces';
 import { supabase } from '@/lib/supabase/client';
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
 
 type StoryStatus = Story['status'];
 
@@ -23,6 +24,10 @@ type StoryPageResult = {
 };
 
 export class SupabaseStoryRepository implements IStoryRepository {
+  private async getAuthHeaders(): Promise<Record<string, string>> {
+    return getPrivilegedAuthHeaders();
+  }
+
   async getStories(): Promise<Story[]> {
     if (!supabase) return [];
 
@@ -54,7 +59,8 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async saveStory(story: Partial<Story>): Promise<Story> {
-    const res = await fetch('/api/internal/admin/manage-story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story }) });
+    const authHeaders = await this.getAuthHeaders();
+    const res = await fetch('/api/internal/admin/manage-story', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ story }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);
@@ -95,7 +101,8 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async updateStory(id: string, payload: Pick<Story, 'title' | 'description' | 'status'>): Promise<Story> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', id, payload }) });
+    const authHeaders = await this.getAuthHeaders();
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ action: 'update', id, payload }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);
@@ -103,21 +110,24 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async deleteStory(id: string): Promise<void> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) });
+    const authHeaders = await this.getAuthHeaders();
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ action: 'delete', id }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);
   }
 
   async bulkUpdateStatus(ids: string[], status: Story['status']): Promise<void> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulkUpdateStatus', ids, status }) });
+    const authHeaders = await this.getAuthHeaders();
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ action: 'bulkUpdateStatus', ids, status }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);
   }
 
   async bulkDeleteStories(ids: string[]): Promise<void> {
-    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulkDelete', ids }) });
+    const authHeaders = await this.getAuthHeaders();
+    const res = await fetch(`/api/internal/admin/manage-story`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ action: 'bulkDelete', ids }) });
     if (!res.ok) throw new Error('Request failed');
     const json = await res.json();
     if (json.error) throw new Error(json.error);

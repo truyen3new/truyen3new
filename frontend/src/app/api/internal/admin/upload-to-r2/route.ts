@@ -1,5 +1,6 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdminAuthorization } from '../_auth';
 
 function getR2Client(): S3Client {
   const accountId = process.env.R2_ACCOUNT_ID;
@@ -21,12 +22,15 @@ function getR2Client(): S3Client {
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const bucket = request.headers.get("x-r2-bucket")?.trim();
     if (!bucket) {
       return NextResponse.json({ error: "x-r2-bucket header is required" }, { status: 400 });
     }
+
+    const auth = await requireAdminAuthorization(request);
+    if (!auth.ok) return auth.response;
 
     const form = await request.formData();
     const files = Array.from(form.values()).filter((entry): entry is File => entry instanceof File);

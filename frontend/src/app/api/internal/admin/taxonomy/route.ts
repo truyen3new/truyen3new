@@ -1,43 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createSessionClient } from '@/lib/server';
-import { getServerSupabase } from '@/lib/supabase/server';
-
-async function getRequester(request: NextRequest) {
-  const internalSecret = request.headers.get('x-internal-secret');
-  if (internalSecret && process.env.INTERNAL_ADMIN_SECRET && internalSecret === process.env.INTERNAL_ADMIN_SECRET) {
-    return { ok: true, role: 'internal' };
-  }
-
-  try {
-    const sessionClient = await createSessionClient();
-    const { data: userData, error: userError } = await sessionClient.auth.getUser();
-    const userId = userData.user?.id;
-    if (userError || !userId) return { ok: false };
-
-    // Try profiles table first
-    const supabase = getServerSupabase();
-    if (supabase) {
-      const { data } = await supabase.from('profiles').select('id,role').eq('id', userId).single();
-      if (data?.role) return { ok: true, id: userId, role: data.role };
-    }
-
-    // Fall back to app_metadata.role or user_metadata.role
-    const metadataRole = userData.user?.app_metadata?.role ?? userData.user?.user_metadata?.role;
-    if (typeof metadataRole === 'string' && metadataRole.trim()) {
-      return { ok: true, id: userId, role: metadataRole.trim() };
-    }
-
-    return { ok: false };
-  } catch {
-    return { ok: false };
-  }
-}
+import { requireAdminAuthorization } from '../_auth';
+import { getServerSupabaseForRequest, hasServerSupabaseServiceRoleKey } from '@/lib/supabase/server';
 
 export async function GET(req: NextRequest) {
-  const requester = await getRequester(req);
-  if (!requester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const auth = await requireAdminAuthorization(req);
+  if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabase();
+  const supabase = getServerSupabaseForRequest(req);
   if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
 
   const type = req.nextUrl.searchParams.get('type');
@@ -56,15 +25,35 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ error: 'type param required' }, { status: 400 });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || String(e) }, { status: 500 });
+    const message = e?.message || String(e);
+    if (/row-level security policy/i.test(message)) {
+      return NextResponse.json(
+        {
+          error:
+            'forbidden: RLS blocked this write. Sign in as an admin so a bearer token is forwarded, or configure SUPABASE_SERVICE_ROLE_KEY for internal-secret writes.',
+        },
+        { status: 403 },
+      );
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
-  const requester = await getRequester(req);
-  if (!requester.ok) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const auth = await requireAdminAuthorization(req);
+  if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabase();
+  if (auth.requester.role === 'internal' && !hasServerSupabaseServiceRoleKey()) {
+    return NextResponse.json(
+      {
+        error:
+          'internal-secret writes require SUPABASE_SERVICE_ROLE_KEY (sb_service_role_*). Current configuration only has publishable/anon key.',
+      },
+      { status: 503 },
+    );
+  }
+
+  const supabase = getServerSupabaseForRequest(req);
   if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
   const body = await req.json();
   const { entity, action, id, payload } = body;

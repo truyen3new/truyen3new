@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { requireRouteAuthorization } from '@/lib/routeAuth';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -21,9 +22,12 @@ export async function GET(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const supabase = getServerSupabase();
   if (!supabase) return NextResponse.json({ error: 'server supabase unavailable' }, { status: 500 });
+
+  const auth = await requireRouteAuthorization(req, { allowedRoles: ['admin', 'superadmin', 'internal'] });
+  if (!auth.ok) return auth.response;
 
   const body = await req.json();
   const payload = body.payload || [];

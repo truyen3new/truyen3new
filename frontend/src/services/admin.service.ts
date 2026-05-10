@@ -1,7 +1,12 @@
 import { supabase } from '@/lib/supabase/client';
 import { AdminDashboardQueryGateway } from '@/infrastructure/query/AdminDashboardQueryGateway';
+import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
 
 const dashboardGateway = new AdminDashboardQueryGateway();
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  return getPrivilegedAuthHeaders();
+}
 
 export async function logDashboardAccess(actorUserId: string) {
   void actorUserId;
@@ -56,9 +61,11 @@ export async function fetchProfiles() {
 }
 
 export async function updateProfileRole(id: string, role: string) {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch('/api/internal/admin/profiles', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
+    credentials: 'include',
     body: JSON.stringify({ action: 'updateRole', id, role }),
   });
   if (!res.ok) {
@@ -73,9 +80,11 @@ export async function updateProfileRole(id: string, role: string) {
 }
 
 export async function updateProfileName(id: string, full_name: string | null) {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch('/api/internal/admin/profiles', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
+    credentials: 'include',
     body: JSON.stringify({ action: 'updateName', id, full_name }),
   });
   if (!res.ok) {
@@ -97,10 +106,8 @@ export async function callManageUserFunction(body: Record<string, unknown>) {
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   try {
-    if (supabase) {
-      const sessionResult = await supabase.auth.getSession();
-      accessToken = sessionResult.data.session?.access_token ?? null;
-    }
+    const authHeaders = await getPrivilegedAuthHeaders();
+    accessToken = authHeaders.Authorization?.replace(/^Bearer\s+/i, '') ?? null;
   } catch {
     accessToken = null;
   }
