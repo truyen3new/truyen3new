@@ -37,6 +37,6 @@ export async function getPrivilegedAuthHeadersWithInternal(): Promise<Record<str
   // `x-internal-secret` fallback when no bearer token is available. This avoids
   // triggering the server-side "internal" flow (which requires a service-role
   // key) when the user is already signed in as an admin.
-  if (headers.Authorization) return headers;
+  if ('Authorization' in headers) return headers;
   return { ...headers, ...getInternalSecretHeader() };
 }
