@@ -1,0 +1,14 @@
+name = "lightstory-r2-proxy"
+main = "worker.js"
+compatibility_date = "2026-05-10"
+
+[triggers]
+crons = []
+
+[r2_buckets]
+binding = "ASSETS_BUCKET"
+bucket_name = "lightstory-assets"
+
+[[kv_namespaces]]
+binding = "KV"
+namespace_id = ""
