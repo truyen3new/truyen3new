@@ -20,3 +20,9 @@ export const StorySchema = z.object({
 });
 
 export type StoryInput = z.infer<typeof StorySchema>;
+
+export const ViewSchema = z.object({
+  storyId: z.string().uuid('storyId must be a valid UUID'),
+});
+
+export type ViewInput = z.infer<typeof ViewSchema>;

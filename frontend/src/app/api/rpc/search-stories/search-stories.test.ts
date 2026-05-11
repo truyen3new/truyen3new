@@ -16,7 +16,7 @@
 import { expect, describe, it, beforeEach } from 'vitest';
 
 describe('POST /api/rpc/search-stories', () => {
-  const baseUrl = 'http://localhost:3000';
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
 
   // Mock 1536-dimensional embedding (normally from ML model like OpenAI embeddings)
   const mockEmbedding1536 = new Array(1536).fill(0.5);
