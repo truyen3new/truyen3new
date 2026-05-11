@@ -22,7 +22,7 @@ This package is a standalone Cloudflare Workers backend for a SaaS product where
 - `GET /admin/failed-tenants` - list tenants with provisioning failures
 - `POST /admin/recover/:tenantId` - recover a failed provisioning attempt
 
-### Tenant Endpoints (require `X-Tenant-Key` header)
+### Tenant Endpoints (require `X-Tenant-Key` and `Authorization: Bearer <jwt>` headers)
 
 - `GET /tenants/:tenantId` - inspect one tenant
 - `GET /tenants/:tenantId/stories` - list tenant stories
@@ -30,6 +30,13 @@ This package is a standalone Cloudflare Workers backend for a SaaS product where
 - `GET /tenants/:tenantId/stories/:storyId` - fetch one tenant story
 - `PUT /tenants/:tenantId/stories/:storyId` - update a tenant story
 - `DELETE /tenants/:tenantId/stories/:storyId` - delete a tenant story
+
+RBAC enforcement:
+
+- `superadmin`: full access to tenant content routes.
+- `admin`: manage story metadata and perform deletes.
+- `employee`: create/update content but no delete access.
+- `user`: read-only content access.
 
 ## Environment
 

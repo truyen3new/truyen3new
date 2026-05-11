@@ -123,17 +123,22 @@ function parseClaimsFromJwt(token: string): IdentityClaims | null {
 }
 
 async function resolveRoleFromDatabase(env: RbacEnv, userId: number): Promise<RoleName | null> {
-  const row = await env.CONTROL_DB
-    .prepare(
-      `SELECT r.name AS role
-       FROM users u
-       JOIN roles r ON r.id = u.role_id
-       WHERE u.id = ?1`
-    )
-    .bind(userId)
-    .first<{ role: string }>();
+  try {
+    const row = await env.CONTROL_DB
+      .prepare(
+        `SELECT r.name AS role
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         WHERE u.id = ?1`
+      )
+      .bind(userId)
+      .first<{ role: string }>();
 
-  return row ? normalizeRole(row.role) : null;
+    return row ? normalizeRole(row.role) : null;
+  } catch {
+    // If the role tables are not migrated yet, fallback to JWT claim role.
+    return null;
+  }
 }
 
 export async function resolveIdentity(request: Request, env: RbacEnv): Promise<IdentityContext | null> {

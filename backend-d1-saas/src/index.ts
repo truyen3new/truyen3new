@@ -65,6 +65,7 @@ interface ProvisionedDatabase {
   name: string;
 }
 
+import { hasPermission, requirePermission, resolveIdentity } from './lib/rbac';
 import { createErrorResponse, createJsonResponse, jsonHeaders } from './shared/core';
 
 const TENANT_SCHEMA_STATEMENTS = [
@@ -210,6 +211,42 @@ function normalizeChapterContent(value: unknown): string {
   }
 
   return "";
+}
+
+async function requireAnyRolePermission(
+  request: Request,
+  env: Env,
+  permissions: readonly Parameters<typeof hasPermission>[1][],
+): Promise<Response | null> {
+  if (permissions.length === 0) {
+    return new Response("Forbidden", { status: 403, headers: jsonHeaders });
+  }
+
+  const identity = await resolveIdentity(request, env);
+  if (!identity) {
+    return new Response("Unauthorized", { status: 401, headers: jsonHeaders });
+  }
+
+  for (const permission of permissions) {
+    if (hasPermission(identity, permission)) {
+      return null;
+    }
+  }
+
+  const [firstPermission] = permissions;
+  if (!firstPermission) {
+    return new Response("Forbidden", { status: 403, headers: jsonHeaders });
+  }
+
+  const denied = requirePermission(identity, firstPermission);
+  if (!denied) {
+    return new Response("Forbidden", { status: 403, headers: jsonHeaders });
+  }
+
+  return new Response(denied.body, {
+    status: denied.status,
+    headers: jsonHeaders,
+  });
 }
 
 class CloudflareD1AdminClient {
@@ -629,11 +666,25 @@ export default {
         }
 
         if (path.length === 3 && path[2] === "stories" && request.method === "GET") {
+          const denied = await requireAnyRolePermission(request, env, ["stories:read"]);
+          if (denied) {
+            return denied;
+          }
+
           const stories = await tenantClient.listStories(tenant.database_id);
           return jsonResponse({ tenant: getTenantSummary(tenant), stories });
         }
 
         if (path.length === 3 && path[2] === "stories" && request.method === "POST") {
+          const denied = await requireAnyRolePermission(request, env, [
+            "comics:metadata:manage",
+            "metadata:edit",
+            "tables:crud:all",
+          ]);
+          if (denied) {
+            return denied;
+          }
+
           const body = await readJsonBody<{
             title: string;
             slug: string;
@@ -674,6 +725,11 @@ export default {
           }
 
           if (request.method === "GET") {
+            const denied = await requireAnyRolePermission(request, env, ["stories:read"]);
+            if (denied) {
+              return denied;
+            }
+
             const story = await tenantClient.getStory(tenant.database_id, storyId);
             if (!story) {
               return errorResponse("Story not found", 404);
@@ -682,6 +738,15 @@ export default {
           }
 
           if (request.method === "PUT") {
+            const denied = await requireAnyRolePermission(request, env, [
+              "comics:metadata:manage",
+              "metadata:edit",
+              "tables:crud:all",
+            ]);
+            if (denied) {
+              return denied;
+            }
+
             const body = await readJsonBody<{
               title: string;
               slug: string;
@@ -719,6 +784,14 @@ export default {
           }
 
           if (request.method === "DELETE") {
+            const denied = await requireAnyRolePermission(request, env, [
+              "comics:metadata:manage",
+              "tables:crud:all",
+            ]);
+            if (denied) {
+              return denied;
+            }
+
             const deleted = await tenantClient.deleteStory(tenant.database_id, storyId);
             if (!deleted) {
               return errorResponse("Story not found", 404);
@@ -734,11 +807,24 @@ export default {
           }
 
           if (request.method === "GET") {
+            const denied = await requireAnyRolePermission(request, env, ["stories:read"]);
+            if (denied) {
+              return denied;
+            }
+
             const chapters = await tenantClient.listChapters(tenant.database_id, storyId);
             return jsonResponse({ tenant: getTenantSummary(tenant), chapters });
           }
 
           if (request.method === "POST") {
+            const denied = await requireAnyRolePermission(request, env, [
+              "chapters:insert",
+              "tables:crud:all",
+            ]);
+            if (denied) {
+              return denied;
+            }
+
             const body = await readJsonBody<{
               chapter_number: number;
               title: string;
