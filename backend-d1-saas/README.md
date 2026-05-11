@@ -50,6 +50,8 @@ The control-plane D1 database is bound as `CONTROL_DB`.
 4. Store `CF_API_TOKEN` and `ADMIN_API_KEY` as Wrangler secrets.
 5. Run `npm run dev` to start the worker locally.
 
+Dev URL: when running `wrangler dev` the worker is available on `http://127.0.0.1:8787` (the repository convention uses `http://localhost:8787` for `BACKEND_D1_SAAS_URL`).
+
 ## Testing
 
 Run smoke tests against a live worker:
