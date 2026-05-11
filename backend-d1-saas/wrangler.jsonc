@@ -9,7 +9,9 @@
   },
   "vars": {
     "CF_ACCOUNT_ID": "<cloudflare-account-id>",
-    "TENANT_DATABASE_PREFIX": "tenant"
+    "TENANT_DATABASE_PREFIX": "tenant",
+    "ADMIN_API_KEY": "test-admin-key-12345",
+    "ENABLE_LOCAL_DEV_FALLBACK": "true"
   },
   "d1_databases": [
     {

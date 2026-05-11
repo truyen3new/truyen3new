@@ -4,8 +4,17 @@ type Permission =
   | 'tables:crud:all'
   | 'roles:manage:admin'
   | 'r2:bucket:lifecycle'
+  | 'comics:create'
+  | 'comics:update'
+  | 'comics:delete'
   | 'comics:metadata:manage'
+  | 'chapters:create'
+  | 'chapters:update'
+  | 'chapters:delete'
   | 'chapters:metadata:manage'
+  | 'pages:create'
+  | 'pages:update'
+  | 'pages:delete'
   | 'r2:assets:upload'
   | 'r2:assets:delete'
   | 'comments:moderate'
@@ -14,6 +23,7 @@ type Permission =
   | 'metadata:edit'
   | 'comments:own:manage'
   | 'reading_history:own:manage'
+  | 'audit_logs:read'
   | 'stories:read';
 
 interface D1PreparedStatement {
@@ -44,8 +54,17 @@ const ROLE_PERMISSIONS: Record<RoleName, readonly Permission[]> = {
     'tables:crud:all',
     'roles:manage:admin',
     'r2:bucket:lifecycle',
+    'comics:create',
+    'comics:update',
+    'comics:delete',
     'comics:metadata:manage',
+    'chapters:create',
+    'chapters:update',
+    'chapters:delete',
     'chapters:metadata:manage',
+    'pages:create',
+    'pages:update',
+    'pages:delete',
     'r2:assets:upload',
     'r2:assets:delete',
     'comments:moderate',
@@ -54,20 +73,35 @@ const ROLE_PERMISSIONS: Record<RoleName, readonly Permission[]> = {
     'metadata:edit',
     'comments:own:manage',
     'reading_history:own:manage',
+    'audit_logs:read',
     'stories:read',
   ],
   admin: [
+    'comics:create',
+    'comics:update',
+    'comics:delete',
     'comics:metadata:manage',
+    'chapters:create',
+    'chapters:update',
+    'chapters:delete',
     'chapters:metadata:manage',
+    'pages:create',
+    'pages:update',
+    'pages:delete',
     'r2:assets:upload',
     'r2:assets:delete',
     'comments:moderate',
     'chapters:insert',
     'pages:insert',
     'metadata:edit',
+    'audit_logs:read',
     'stories:read',
   ],
   employee: [
+    'chapters:create',
+    'chapters:update',
+    'pages:create',
+    'pages:update',
     'chapters:insert',
     'pages:insert',
     'metadata:edit',
