@@ -206,17 +206,30 @@ serve(async (req) => {
       return jsonResponse({ error: "Forbidden" }, 403);
     }
 
-    const userId = payload?.userId;
-    const targetEmail = typeof payload?.targetEmail === "string" ? payload.targetEmail.trim() : null;
-    if (typeof userId !== "string" || !userId.trim()) {
+    const userIdFromBody = body.userId;
+    const targetEmail = typeof body.targetEmail === "string" ? body.targetEmail.trim() : null;
+
+    if (!userIdFromBody && !targetEmail) {
       return jsonResponse({ error: "userId is required" }, 400);
     }
 
-    if (userId === verifiedUser.userId) {
-      return jsonResponse({ error: "You cannot delete your own account" }, 400);
+    let targetUserId = userIdFromBody ?? null;
+
+    if (!targetUserId && targetEmail) {
+      const { data: profileRecord, error: findError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', targetEmail)
+        .maybeSingle();
+      if (findError || !profileRecord?.id) {
+        return jsonResponse({ error: 'target user not found' }, 404);
+      }
+      targetUserId = profileRecord.id;
     }
 
-    const targetUserId = userId.trim();
+    if (targetUserId === verifiedUser.userId) {
+      return jsonResponse({ error: "You cannot delete your own account" }, 400);
+    }
     const banUntil = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000).toISOString();
 
     const { error: banError } = await supabase.auth.admin.updateUserById(targetUserId, {
