@@ -13,7 +13,27 @@
  * - Then: curl -X POST http://localhost:3000/api/rpc/search-stories -H "Content-Type: application/json" -d @payload.json
  */
 
-import { expect, describe, it, beforeEach } from 'vitest';
+import { expect, describe, it, beforeEach, vi } from 'vitest';
+
+// Mock Supabase server client to avoid external RPC calls during tests
+const mockResults = [
+  { id: '00000000-0000-0000-0000-000000000001', title: 'Mock Story', summary: 'Mock summary', cover_url: null, similarity: 0.9 },
+];
+
+vi.mock('@/lib/supabase/server', async () => {
+  return {
+    getServerSupabase: () => ({
+      rpc: async (fnName: string, params: any) => {
+        return { data: mockResults, error: null };
+      },
+    }),
+    default: () => ({
+      rpc: async (fnName: string, params: any) => {
+        return { data: mockResults, error: null };
+      },
+    }),
+  };
+});
 
 describe('POST /api/rpc/search-stories', () => {
   const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
@@ -172,13 +192,14 @@ describe('POST /api/rpc/search-stories', () => {
         embedding: 'not-an-array',
         matchCount: 10,
       };
-
-      const res = await fetch(`${baseUrl}/api/rpc/search-stories`, {
+      const { POST } = await import('./route');
+      const req = new Request('http://localhost/api/rpc/search-stories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
+      const res = await POST(req);
+      const json = res.json ? await res.json() : JSON.parse(await res.text());
       expect(res.status).toBe(400);
     });
 
@@ -186,13 +207,14 @@ describe('POST /api/rpc/search-stories', () => {
       const payload = {
         matchCount: 10,
       };
-
-      const res = await fetch(`${baseUrl}/api/rpc/search-stories`, {
+      const { POST } = await import('./route');
+      const req = new Request('http://localhost/api/rpc/search-stories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
+      const res = await POST(req);
+      const json = res.json ? await res.json() : JSON.parse(await res.text());
       expect(res.status).toBe(400);
     });
   });
