@@ -3,6 +3,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { verifySupabaseBearerToken } from "../_shared/jwt.ts";
+import { ChapterSchema } from "../lib/validators/stories.validator.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -33,26 +34,20 @@ serve(async (req) => {
   }
 
   const payload = await req.json().catch(() => null);
-  const storyId = payload?.story_id;
-  const chapterNumber = payload?.chapter_number;
-  const title = payload?.title;
-  const content = payload?.content;
 
-  if (
-    typeof storyId !== "string" ||
-    typeof title !== "string" ||
-    typeof content !== "string" ||
-    !storyId.trim() ||
-    !title.trim() ||
-    !content.trim()
-  ) {
-    return jsonResponse({ error: "story_id, title, and content are required" }, 400);
+  const parsed = ChapterSchema.safeParse({
+    story_id: payload?.story_id || payload?.storyId,
+    chapter_number: payload?.chapter_number || payload?.chapterNumber,
+    title: payload?.title,
+    content: payload?.content,
+    vip_content: payload?.vip_content ?? payload?.vipContent,
+  });
+
+  if (!parsed.success) {
+    return jsonResponse({ error: 'Invalid input', details: parsed.error.errors }, 400);
   }
 
-  const parsedChapterNumber = Number(chapterNumber);
-  if (!Number.isInteger(parsedChapterNumber) || parsedChapterNumber <= 0) {
-    return jsonResponse({ error: "chapter_number must be a positive integer" }, 400);
-  }
+  const { story_id: storyId, chapter_number: chapterNumber, title, content, vip_content } = parsed.data;
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   let verifiedUser;

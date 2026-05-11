@@ -3,6 +3,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { verifySupabaseBearerToken } from "../_shared/jwt.ts";
+import { StorySchema } from "../lib/validators/stories.validator.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -33,21 +34,21 @@ serve(async (req) => {
   }
 
   const payload = await req.json().catch(() => null);
-  const title = payload?.title;
-  const authorId = payload?.authorId;
-  const categoryId = payload?.categoryId;
 
-  if (typeof title !== "string" || !title.trim()) {
-    return jsonResponse({ error: "title is required" }, 400);
+  const parsed = StorySchema.safeParse({
+    title: payload?.title,
+    summary: payload?.summary,
+    cover_url: payload?.cover_url,
+    author_id: payload?.authorId || payload?.author_id,
+    category_id: payload?.categoryId || payload?.category_id,
+    status: payload?.status,
+  });
+
+  if (!parsed.success) {
+    return jsonResponse({ error: 'Invalid input', details: parsed.error.errors }, 400);
   }
 
-  if (typeof authorId !== "string" || !authorId.trim()) {
-    return jsonResponse({ error: "authorId is required" }, 400);
-  }
-
-  if (typeof categoryId !== "string" || !categoryId.trim()) {
-    return jsonResponse({ error: "categoryId is required" }, 400);
-  }
+  const { title, author_id: authorId, category_id: categoryId, summary, cover_url, status } = parsed.data;
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   let verifiedUser;
