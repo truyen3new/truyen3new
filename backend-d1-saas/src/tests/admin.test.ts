@@ -3,9 +3,23 @@
  */
 
 import { AdminClient } from "../client";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-const TEST_BASE_URL = "http://localhost:8787";
-const TEST_ADMIN_KEY = "test-admin-key-12345";
+const TEST_BASE_URL = loadEnvValue("BACKEND_BASE_URL") ?? "http://localhost:8788";
+
+function loadEnvValue(name: string): string | undefined {
+  const envPath = resolve(process.cwd(), "..", ".env");
+  if (!existsSync(envPath)) {
+    return undefined;
+  }
+
+  const content = readFileSync(envPath, "utf8");
+  const match = content.match(new RegExp(`^${name}=([^\r\n]+)$`, "m"));
+  return match?.[1]?.trim();
+}
+
+const TEST_ADMIN_KEY = loadEnvValue("ADMIN_API_KEY") ?? "test-admin-key-12345";
 
 describe("AdminClient", () => {
   const client = new AdminClient({

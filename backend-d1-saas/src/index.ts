@@ -15,6 +15,7 @@ interface Env {
   CF_API_TOKEN: string;
   TENANT_DATABASE_PREFIX: string;
   ADMIN_API_KEY: string;
+  ENABLE_LOCAL_DEV_FALLBACK?: string;
 }
 
 interface TenantRow {
@@ -36,9 +37,16 @@ interface StoryRow {
   description: string;
   cover_url: string;
   status: string;
+  scheduled_at: string | null;
   view_count: number;
   author: string;
   category: string;
+  genres: string;
+  tags: string;
+  artist: string;
+  translator: string;
+  source: string;
+  rank_score: number;
   created_at: string;
   updated_at: string;
 }
@@ -48,10 +56,22 @@ interface ChapterRow {
   story_id: string;
   chapter_number: number;
   title: string;
+  status: string;
+  scheduled_at: string | null;
   content: string;
   view_count: number;
   created_at: string;
   updated_at: string;
+}
+
+interface AuditLogRow {
+  id: string;
+  actor_id: number | null;
+  action: string;
+  target_type: string;
+  target_id: string;
+  changes: string;
+  timestamp: string;
 }
 
 interface CloudflareApiResponse<T> {
@@ -69,17 +89,34 @@ import { hasPermission, requirePermission, resolveIdentity } from './lib/rbac';
 import { createErrorResponse, createJsonResponse, jsonHeaders } from './shared/core';
 
 const TENANT_SCHEMA_STATEMENTS = [
-  "CREATE TABLE IF NOT EXISTS stories (id TEXT PRIMARY KEY, title TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', cover_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ongoing' CHECK (status IN ('ongoing', 'completed')), view_count INTEGER NOT NULL DEFAULT 0, author TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+  "CREATE TABLE IF NOT EXISTS stories (id TEXT PRIMARY KEY, title TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', cover_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'published', 'archived')), scheduled_at TEXT, view_count INTEGER NOT NULL DEFAULT 0, author TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '[]', genres TEXT NOT NULL DEFAULT '[]', tags TEXT NOT NULL DEFAULT '[]', artist TEXT NOT NULL DEFAULT '', translator TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', rank_score REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
   "CREATE INDEX IF NOT EXISTS idx_stories_slug ON stories (slug)",
   "CREATE INDEX IF NOT EXISTS idx_stories_status ON stories (status)",
+  "CREATE INDEX IF NOT EXISTS idx_stories_scheduled_at ON stories (scheduled_at)",
+  "CREATE INDEX IF NOT EXISTS idx_stories_rank_score ON stories (rank_score DESC)",
   "CREATE INDEX IF NOT EXISTS idx_stories_updated_at ON stories (updated_at DESC)",
-  "CREATE TABLE IF NOT EXISTS chapters (id TEXT PRIMARY KEY, story_id TEXT NOT NULL REFERENCES stories (id) ON DELETE CASCADE, chapter_number INTEGER NOT NULL CHECK (chapter_number > 0), title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', view_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (story_id, chapter_number))",
+  "CREATE TABLE IF NOT EXISTS chapters (id TEXT PRIMARY KEY, story_id TEXT NOT NULL REFERENCES stories (id) ON DELETE CASCADE, chapter_number INTEGER NOT NULL CHECK (chapter_number > 0), title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'published', 'archived')), scheduled_at TEXT, content TEXT NOT NULL DEFAULT '', view_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (story_id, chapter_number))",
   "CREATE INDEX IF NOT EXISTS idx_chapters_story_id ON chapters (story_id)",
   "CREATE INDEX IF NOT EXISTS idx_chapters_story_number ON chapters (story_id, chapter_number)",
+  "CREATE INDEX IF NOT EXISTS idx_chapters_status ON chapters (status)",
+  "CREATE INDEX IF NOT EXISTS idx_chapters_scheduled_at ON chapters (scheduled_at)",
   "CREATE INDEX IF NOT EXISTS idx_chapters_updated_at ON chapters (updated_at DESC)",
+  "CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, changes TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+  "CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs (target_type, target_id)",
+  "CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_timestamp ON audit_logs (actor_id, timestamp DESC)",
   "CREATE TRIGGER IF NOT EXISTS trg_chapters_sync_story_views_after_insert AFTER INSERT ON chapters BEGIN UPDATE stories SET view_count = (SELECT COALESCE(SUM(view_count), 0) FROM chapters WHERE story_id = NEW.story_id), updated_at = CURRENT_TIMESTAMP WHERE id = NEW.story_id; END",
   "CREATE TRIGGER IF NOT EXISTS trg_chapters_sync_story_views_after_update AFTER UPDATE OF view_count, story_id ON chapters BEGIN UPDATE stories SET view_count = (SELECT COALESCE(SUM(view_count), 0) FROM chapters WHERE story_id = NEW.story_id), updated_at = CURRENT_TIMESTAMP WHERE id = NEW.story_id; UPDATE stories SET view_count = (SELECT COALESCE(SUM(view_count), 0) FROM chapters WHERE story_id = OLD.story_id), updated_at = CURRENT_TIMESTAMP WHERE id = OLD.story_id AND OLD.story_id <> NEW.story_id; END",
   "CREATE TRIGGER IF NOT EXISTS trg_chapters_sync_story_views_after_delete AFTER DELETE ON chapters BEGIN UPDATE stories SET view_count = (SELECT COALESCE(SUM(view_count), 0) FROM chapters WHERE story_id = OLD.story_id), updated_at = CURRENT_TIMESTAMP WHERE id = OLD.story_id; END",
+];
+
+const TENANT_SCHEMA_STATEMENTS_LOCAL = [
+  "CREATE TABLE IF NOT EXISTS stories (id TEXT PRIMARY KEY, title TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', cover_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft', scheduled_at TEXT, view_count INTEGER NOT NULL DEFAULT 0, author TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '[]', genres TEXT NOT NULL DEFAULT '[]', tags TEXT NOT NULL DEFAULT '[]', artist TEXT NOT NULL DEFAULT '', translator TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', rank_score REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+  "CREATE INDEX IF NOT EXISTS idx_stories_slug ON stories (slug)",
+  "CREATE INDEX IF NOT EXISTS idx_stories_status ON stories (status)",
+  "CREATE TABLE IF NOT EXISTS chapters (id TEXT PRIMARY KEY, story_id TEXT NOT NULL, chapter_number INTEGER NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', scheduled_at TEXT, content TEXT NOT NULL DEFAULT '', view_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+  "CREATE INDEX IF NOT EXISTS idx_chapters_story_id ON chapters (story_id)",
+  "CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, changes TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+  "CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs (target_type, target_id)",
 ];
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -132,7 +169,7 @@ function buildTenantDatabaseName(env: Env, tenantSlug: string, tenantId: string)
 
 function requireAdmin(request: Request, env: Env): Response | null {
   const adminKey = request.headers.get("x-admin-key");
-  if (!adminKey || !constantTimeEquals(adminKey, env.ADMIN_API_KEY)) {
+  if (!adminKey || !env.ADMIN_API_KEY || !constantTimeEquals(adminKey, env.ADMIN_API_KEY)) {
     return errorResponse("Unauthorized admin request", 401);
   }
   return null;
@@ -213,40 +250,115 @@ function normalizeChapterContent(value: unknown): string {
   return "";
 }
 
+function normalizeLifecycleStatus(value: unknown, fallback: string = "draft"): string {
+  if (typeof value !== "string" || !value.trim()) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "ongoing") {
+    return "published";
+  }
+
+  if (normalized === "completed") {
+    return "archived";
+  }
+
+  if (normalized === "draft" || normalized === "pending" || normalized === "published" || normalized === "archived") {
+    return normalized;
+  }
+
+  throw new Error("status must be draft, pending, published, or archived");
+}
+
+function optionalStringOrNullField(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function optionalNumberField(value: unknown, fallback = 0): number {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return fallback;
+  }
+
+  return value;
+}
+
+function normalizeJsonArrayField(value: unknown, fallback = "[]"): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return fallback;
+    }
+
+    JSON.parse(trimmed);
+    return trimmed;
+  }
+
+  if (Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+
+  if (value && typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return fallback;
+}
+
 async function requireAnyRolePermission(
   request: Request,
   env: Env,
   permissions: readonly Parameters<typeof hasPermission>[1][],
-): Promise<Response | null> {
+): Promise<{ identity: Awaited<ReturnType<typeof resolveIdentity>>; error: Response | null }> {
   if (permissions.length === 0) {
-    return new Response("Forbidden", { status: 403, headers: jsonHeaders });
+    return {
+      identity: null,
+      error: new Response("Forbidden", { status: 403, headers: jsonHeaders }),
+    };
   }
 
   const identity = await resolveIdentity(request, env);
   if (!identity) {
-    return new Response("Unauthorized", { status: 401, headers: jsonHeaders });
+    return {
+      identity: null,
+      error: new Response("Unauthorized", { status: 401, headers: jsonHeaders }),
+    };
   }
 
   for (const permission of permissions) {
     if (hasPermission(identity, permission)) {
-      return null;
+      return { identity, error: null };
     }
   }
 
   const [firstPermission] = permissions;
   if (!firstPermission) {
-    return new Response("Forbidden", { status: 403, headers: jsonHeaders });
+    return {
+      identity,
+      error: new Response("Forbidden", { status: 403, headers: jsonHeaders }),
+    };
   }
 
   const denied = requirePermission(identity, firstPermission);
   if (!denied) {
-    return new Response("Forbidden", { status: 403, headers: jsonHeaders });
+    return {
+      identity,
+      error: new Response("Forbidden", { status: 403, headers: jsonHeaders }),
+    };
   }
 
-  return new Response(denied.body, {
-    status: denied.status,
-    headers: jsonHeaders,
-  });
+  return {
+    identity,
+    error: new Response(denied.body, {
+      status: denied.status,
+      headers: jsonHeaders,
+    }),
+  };
 }
 
 class CloudflareD1AdminClient {
@@ -257,6 +369,29 @@ class CloudflareD1AdminClient {
   }
 
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    // Local dev fallback: route D1 queries to the local CONTROL_DB when enabled
+    const localFallback = this.env.ENABLE_LOCAL_DEV_FALLBACK === "true" || this.env.ENABLE_LOCAL_DEV_FALLBACK === "1";
+    if (localFallback) {
+      // Attempt to execute the SQL via CONTROL_DB if provided in body
+      const sql = (body.sql as string) || "";
+      const params = (body.params as unknown[]) || [];
+      if (!sql) {
+        return {} as T;
+      }
+
+      const stmt = this.env.CONTROL_DB.prepare(sql);
+      const upper = sql.trim().slice(0, 6).toUpperCase();
+      if (upper.startsWith("SELECT") || upper.startsWith("PRAGMA") || upper.startsWith("WITH")) {
+        // @ts-ignore - D1PreparedStatement.all returns { results: T[] }
+        return (await stmt.bind(...params).all()) as unknown as T;
+      }
+
+      // Non-select statements
+      // @ts-ignore - D1PreparedStatement.run available
+      await stmt.bind(...params).run();
+      return {} as T;
+    }
+
     const response = await fetch(this.apiUrl(path), {
       method: "POST",
       headers: {
@@ -276,12 +411,31 @@ class CloudflareD1AdminClient {
   }
 
   async createDatabase(name: string): Promise<ProvisionedDatabase> {
+    const localFallback = this.env.ENABLE_LOCAL_DEV_FALLBACK === "true" || this.env.ENABLE_LOCAL_DEV_FALLBACK === "1";
+    if (localFallback) {
+      // In local dev, return a pseudo database id (use the name as id)
+      return { id: name, name } as ProvisionedDatabase;
+    }
+
     return this.post<ProvisionedDatabase>(`accounts/${this.env.CF_ACCOUNT_ID}/d1/database`, {
       name,
     });
   }
 
   async query(databaseId: string, sql: string, params: unknown[] = []): Promise<unknown> {
+    const localFallback = this.env.ENABLE_LOCAL_DEV_FALLBACK === "true" || this.env.ENABLE_LOCAL_DEV_FALLBACK === "1";
+    if (localFallback) {
+      const stmt = this.env.CONTROL_DB.prepare(sql);
+      const upper = sql.trim().slice(0, 6).toUpperCase();
+      if (upper.startsWith("SELECT") || upper.startsWith("PRAGMA") || upper.startsWith("WITH")) {
+        // @ts-ignore
+        return await stmt.bind(...params).all();
+      }
+
+      // @ts-ignore
+      return await stmt.bind(...params).run();
+    }
+
     return this.post<unknown>(`accounts/${this.env.CF_ACCOUNT_ID}/d1/database/${databaseId}/query`, {
       sql,
       params,
@@ -289,6 +443,16 @@ class CloudflareD1AdminClient {
   }
 
   async bootstrapDatabase(databaseId: string): Promise<void> {
+    const localFallback = this.env.ENABLE_LOCAL_DEV_FALLBACK === "true" || this.env.ENABLE_LOCAL_DEV_FALLBACK === "1";
+    if (localFallback) {
+      for (const statement of TENANT_SCHEMA_STATEMENTS_LOCAL) {
+        const stmt = this.env.CONTROL_DB.prepare(statement);
+        // @ts-ignore
+        await stmt.run();
+      }
+      return;
+    }
+
     for (const statement of TENANT_SCHEMA_STATEMENTS) {
       await this.query(databaseId, statement);
     }
@@ -297,6 +461,11 @@ class CloudflareD1AdminClient {
 
 class ControlPlaneRepository {
   constructor(private readonly db: D1Database) {}
+
+  async ensureSchema(): Promise<void> {
+    await this.db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, slug TEXT NOT NULL, name TEXT NOT NULL, database_id TEXT NOT NULL, database_name TEXT NOT NULL, api_key_hash TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+    await this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants (status)`).run();
+  }
 
   async createTenant(row: Omit<TenantRow, "created_at" | "updated_at">): Promise<void> {
     await this.db
@@ -363,6 +532,19 @@ class TenantDatabaseClient {
   }
 
   private async query<T>(databaseId: string, sql: string, params: unknown[] = []): Promise<T> {
+    const localFallback = this.env.ENABLE_LOCAL_DEV_FALLBACK === "true" || this.env.ENABLE_LOCAL_DEV_FALLBACK === "1";
+    if (localFallback) {
+      const stmt = this.env.CONTROL_DB.prepare(sql);
+      const upper = sql.trim().slice(0, 6).toUpperCase();
+      if (upper.startsWith("SELECT") || upper.startsWith("PRAGMA") || upper.startsWith("WITH")) {
+        // @ts-ignore
+        return await stmt.bind(...params).all();
+      }
+
+      // @ts-ignore
+      return await stmt.bind(...params).run();
+    }
+
     const response = await fetch(this.apiUrl(databaseId), {
       method: "POST",
       headers: {
@@ -384,7 +566,7 @@ class TenantDatabaseClient {
   async listStories(databaseId: string): Promise<StoryRow[]> {
     const result = await this.query<{ results: StoryRow[] }>(
       databaseId,
-      `SELECT id, title, slug, description, cover_url, status, view_count, author, category, created_at, updated_at FROM stories ORDER BY created_at DESC`,
+      `SELECT id, title, slug, description, cover_url, status, scheduled_at, view_count, author, category, genres, tags, artist, translator, source, rank_score, created_at, updated_at FROM stories ORDER BY created_at DESC`,
     );
     return result.results;
   }
@@ -392,7 +574,7 @@ class TenantDatabaseClient {
   async getStory(databaseId: string, id: string): Promise<StoryRow | null> {
     const result = await this.query<{ results: StoryRow[] }>(
       databaseId,
-      `SELECT id, title, slug, description, cover_url, status, view_count, author, category, created_at, updated_at FROM stories WHERE id = ? LIMIT 1`,
+      `SELECT id, title, slug, description, cover_url, status, scheduled_at, view_count, author, category, genres, tags, artist, translator, source, rank_score, created_at, updated_at FROM stories WHERE id = ? LIMIT 1`,
       [id],
     );
     return result.results[0] ?? null;
@@ -400,13 +582,29 @@ class TenantDatabaseClient {
 
   async createStory(
     databaseId: string,
-    story: Pick<StoryRow, "title" | "slug" | "description" | "cover_url" | "status" | "author" | "category">,
+    story: Pick<StoryRow, "title" | "slug" | "description" | "cover_url" | "status" | "scheduled_at" | "author" | "category" | "genres" | "tags" | "artist" | "translator" | "source" | "rank_score">,
   ): Promise<StoryRow> {
     const id = crypto.randomUUID();
     const result = await this.query<{ results: StoryRow[] }>(
       databaseId,
-      `INSERT INTO stories (id, title, slug, description, cover_url, status, author, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, title, slug, description, cover_url, status, view_count, author, category, created_at, updated_at`,
-      [id, story.title, story.slug, story.description, story.cover_url, story.status, story.author, story.category],
+      `INSERT INTO stories (id, title, slug, description, cover_url, status, scheduled_at, author, category, genres, tags, artist, translator, source, rank_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, title, slug, description, cover_url, status, scheduled_at, view_count, author, category, genres, tags, artist, translator, source, rank_score, created_at, updated_at`,
+      [
+        id,
+        story.title,
+        story.slug,
+        story.description,
+        story.cover_url,
+        story.status,
+        story.scheduled_at,
+        story.author,
+        story.category,
+        story.genres,
+        story.tags,
+        story.artist,
+        story.translator,
+        story.source,
+        story.rank_score,
+      ],
     );
     const created = result.results[0];
     if (!created) {
@@ -418,7 +616,7 @@ class TenantDatabaseClient {
   async listChapters(databaseId: string, storyId: string): Promise<ChapterRow[]> {
     const result = await this.query<{ results: ChapterRow[] }>(
       databaseId,
-      `SELECT id, story_id, chapter_number, title, content, view_count, created_at, updated_at FROM chapters WHERE story_id = ? ORDER BY chapter_number ASC`,
+      `SELECT id, story_id, chapter_number, title, status, scheduled_at, content, view_count, created_at, updated_at FROM chapters WHERE story_id = ? ORDER BY chapter_number ASC`,
       [storyId],
     );
     return result.results;
@@ -426,13 +624,21 @@ class TenantDatabaseClient {
 
   async createChapter(
     databaseId: string,
-    chapter: Pick<ChapterRow, "story_id" | "chapter_number" | "title" | "content">,
+    chapter: Pick<ChapterRow, "story_id" | "chapter_number" | "title" | "status" | "scheduled_at" | "content">,
   ): Promise<ChapterRow> {
     const id = crypto.randomUUID();
     const result = await this.query<{ results: ChapterRow[] }>(
       databaseId,
-      `INSERT INTO chapters (id, story_id, chapter_number, title, content) VALUES (?, ?, ?, ?, ?) RETURNING id, story_id, chapter_number, title, content, view_count, created_at, updated_at`,
-      [id, chapter.story_id, chapter.chapter_number, chapter.title, normalizeChapterContent(chapter.content)],
+      `INSERT INTO chapters (id, story_id, chapter_number, title, status, scheduled_at, content) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, story_id, chapter_number, title, status, scheduled_at, content, view_count, created_at, updated_at`,
+      [
+        id,
+        chapter.story_id,
+        chapter.chapter_number,
+        chapter.title,
+        chapter.status,
+        chapter.scheduled_at,
+        normalizeChapterContent(chapter.content),
+      ],
     );
 
     const created = result.results[0];
@@ -446,14 +652,41 @@ class TenantDatabaseClient {
   async updateStory(
     databaseId: string,
     id: string,
-    story: Pick<StoryRow, "title" | "slug" | "description" | "cover_url" | "status" | "author" | "category">,
+    story: Pick<StoryRow, "title" | "slug" | "description" | "cover_url" | "status" | "scheduled_at" | "author" | "category" | "genres" | "tags" | "artist" | "translator" | "source" | "rank_score">,
   ): Promise<StoryRow | null> {
     const result = await this.query<{ results: StoryRow[] }>(
       databaseId,
-      `UPDATE stories SET title = ?, slug = ?, description = ?, cover_url = ?, status = ?, author = ?, category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, title, slug, description, cover_url, status, view_count, author, category, created_at, updated_at`,
-      [story.title, story.slug, story.description, story.cover_url, story.status, story.author, story.category, id],
+      `UPDATE stories SET title = ?, slug = ?, description = ?, cover_url = ?, status = ?, scheduled_at = ?, author = ?, category = ?, genres = ?, tags = ?, artist = ?, translator = ?, source = ?, rank_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, title, slug, description, cover_url, status, scheduled_at, view_count, author, category, genres, tags, artist, translator, source, rank_score, created_at, updated_at`,
+      [
+        story.title,
+        story.slug,
+        story.description,
+        story.cover_url,
+        story.status,
+        story.scheduled_at,
+        story.author,
+        story.category,
+        story.genres,
+        story.tags,
+        story.artist,
+        story.translator,
+        story.source,
+        story.rank_score,
+        id,
+      ],
     );
     return result.results[0] ?? null;
+  }
+
+  async recordAuditLog(
+    databaseId: string,
+    entry: Pick<AuditLogRow, "actor_id" | "action" | "target_type" | "target_id" | "changes">,
+  ): Promise<void> {
+    await this.query(
+      databaseId,
+      `INSERT INTO audit_logs (id, actor_id, action, target_type, target_id, changes) VALUES (?, ?, ?, ?, ?, ?)`,
+      [crypto.randomUUID(), entry.actor_id, entry.action, entry.target_type, entry.target_id, entry.changes],
+    );
   }
 
   async deleteStory(databaseId: string, id: string): Promise<boolean> {
@@ -552,6 +785,13 @@ export default {
     const url = new URL(request.url);
     const path = normalizePath(url.pathname);
     const control = new ControlPlaneRepository(env.CONTROL_DB);
+    // Ensure control-plane schema exists in local dev fallback
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await control.ensureSchema();
+    } catch (e) {
+      // ignore
+    }
     const tenantClient = new TenantDatabaseClient(env);
 
     try {
@@ -662,13 +902,18 @@ export default {
         }
 
         if (path.length === 2 && request.method === "GET") {
+          const authorization = await requireAnyRolePermission(request, env, ["stories:read"]);
+          if (authorization.error) {
+            return authorization.error;
+          }
+
           return jsonResponse({ tenant: getTenantSummary(tenant) });
         }
 
         if (path.length === 3 && path[2] === "stories" && request.method === "GET") {
-          const denied = await requireAnyRolePermission(request, env, ["stories:read"]);
-          if (denied) {
-            return denied;
+          const authorization = await requireAnyRolePermission(request, env, ["stories:read"]);
+          if (authorization.error) {
+            return authorization.error;
           }
 
           const stories = await tenantClient.listStories(tenant.database_id);
@@ -676,13 +921,12 @@ export default {
         }
 
         if (path.length === 3 && path[2] === "stories" && request.method === "POST") {
-          const denied = await requireAnyRolePermission(request, env, [
-            "comics:metadata:manage",
-            "metadata:edit",
+          const authorization = await requireAnyRolePermission(request, env, [
+            "comics:create",
             "tables:crud:all",
           ]);
-          if (denied) {
-            return denied;
+          if (authorization.error) {
+            return authorization.error;
           }
 
           const body = await readJsonBody<{
@@ -691,20 +935,31 @@ export default {
             description?: string;
             cover_url?: string;
             status?: string;
+            scheduled_at?: string;
             author: string;
             category?: string | unknown[] | Record<string, unknown>;
+            genres?: string | unknown[] | Record<string, unknown>;
+            tags?: string | unknown[] | Record<string, unknown>;
+            artist?: string;
+            translator?: string;
+            source?: string;
+            rank_score?: number;
           }>(request);
           const title = parseStringField(body.title, "title");
           const slug = parseStringField(body.slug, "slug");
           const description = optionalStringField(body.description, "");
           const coverUrl = optionalStringField(body.cover_url, "");
-          const status = optionalStringField(body.status, "ongoing");
-          if (status !== "ongoing" && status !== "completed") {
-            return errorResponse("status must be either ongoing or completed", 400);
-          }
+          const status = normalizeLifecycleStatus(body.status, "draft");
+          const scheduledAt = optionalStringOrNullField(body.scheduled_at);
 
           const author = parseStringField(body.author, "author");
           const category = optionalJsonStringField(body.category, "[]");
+          const genres = normalizeJsonArrayField(body.genres, "[]");
+          const tags = normalizeJsonArrayField(body.tags, "[]");
+          const artist = optionalStringField(body.artist, "");
+          const translator = optionalStringField(body.translator, "");
+          const source = optionalStringField(body.source, "");
+          const rankScore = optionalNumberField(body.rank_score, 0);
 
           const story = await tenantClient.createStory(tenant.database_id, {
             title,
@@ -712,8 +967,22 @@ export default {
             description,
             cover_url: coverUrl,
             status,
+            scheduled_at: scheduledAt,
             author,
             category,
+            genres,
+            tags,
+            artist,
+            translator,
+            source,
+            rank_score: rankScore,
+          });
+          await tenantClient.recordAuditLog(tenant.database_id, {
+            actor_id: authorization.identity?.userId ?? null,
+            action: "comics.create",
+            target_type: "story",
+            target_id: story.id,
+            changes: JSON.stringify({ after: story }),
           });
           return jsonResponse({ tenant: getTenantSummary(tenant), story }, 201);
         }
@@ -725,9 +994,9 @@ export default {
           }
 
           if (request.method === "GET") {
-            const denied = await requireAnyRolePermission(request, env, ["stories:read"]);
-            if (denied) {
-              return denied;
+            const authorization = await requireAnyRolePermission(request, env, ["stories:read"]);
+            if (authorization.error) {
+              return authorization.error;
             }
 
             const story = await tenantClient.getStory(tenant.database_id, storyId);
@@ -738,13 +1007,12 @@ export default {
           }
 
           if (request.method === "PUT") {
-            const denied = await requireAnyRolePermission(request, env, [
-              "comics:metadata:manage",
-              "metadata:edit",
+            const authorization = await requireAnyRolePermission(request, env, [
+              "comics:update",
               "tables:crud:all",
             ]);
-            if (denied) {
-              return denied;
+            if (authorization.error) {
+              return authorization.error;
             }
 
             const body = await readJsonBody<{
@@ -753,20 +1021,31 @@ export default {
               description?: string;
               cover_url?: string;
               status?: string;
+              scheduled_at?: string;
               author: string;
               category?: string | unknown[] | Record<string, unknown>;
+              genres?: string | unknown[] | Record<string, unknown>;
+              tags?: string | unknown[] | Record<string, unknown>;
+              artist?: string;
+              translator?: string;
+              source?: string;
+              rank_score?: number;
             }>(request);
             const title = parseStringField(body.title, "title");
             const slug = parseStringField(body.slug, "slug");
             const description = optionalStringField(body.description, "");
             const coverUrl = optionalStringField(body.cover_url, "");
-            const status = optionalStringField(body.status, "ongoing");
-            if (status !== "ongoing" && status !== "completed") {
-              return errorResponse("status must be either ongoing or completed", 400);
-            }
+            const status = normalizeLifecycleStatus(body.status, "draft");
+            const scheduledAt = optionalStringOrNullField(body.scheduled_at);
 
             const author = parseStringField(body.author, "author");
             const category = optionalJsonStringField(body.category, "[]");
+            const genres = normalizeJsonArrayField(body.genres, "[]");
+            const tags = normalizeJsonArrayField(body.tags, "[]");
+            const artist = optionalStringField(body.artist, "");
+            const translator = optionalStringField(body.translator, "");
+            const source = optionalStringField(body.source, "");
+            const rankScore = optionalNumberField(body.rank_score, 0);
 
             const story = await tenantClient.updateStory(tenant.database_id, storyId, {
               title,
@@ -774,27 +1053,51 @@ export default {
               description,
               cover_url: coverUrl,
               status,
+              scheduled_at: scheduledAt,
               author,
               category,
+              genres,
+              tags,
+              artist,
+              translator,
+              source,
+              rank_score: rankScore,
             });
             if (!story) {
               return errorResponse("Story not found", 404);
             }
+            await tenantClient.recordAuditLog(tenant.database_id, {
+              actor_id: authorization.identity?.userId ?? null,
+              action: "comics.update",
+              target_type: "story",
+              target_id: story.id,
+              changes: JSON.stringify({ after: story }),
+            });
             return jsonResponse({ tenant: getTenantSummary(tenant), story });
           }
 
           if (request.method === "DELETE") {
-            const denied = await requireAnyRolePermission(request, env, [
-              "comics:metadata:manage",
+            const authorization = await requireAnyRolePermission(request, env, [
+              "comics:delete",
               "tables:crud:all",
             ]);
-            if (denied) {
-              return denied;
+            if (authorization.error) {
+              return authorization.error;
             }
 
+            const existingStory = await tenantClient.getStory(tenant.database_id, storyId);
             const deleted = await tenantClient.deleteStory(tenant.database_id, storyId);
             if (!deleted) {
               return errorResponse("Story not found", 404);
+            }
+            if (existingStory) {
+              await tenantClient.recordAuditLog(tenant.database_id, {
+                actor_id: authorization.identity?.userId ?? null,
+                action: "comics.delete",
+                target_type: "story",
+                target_id: storyId,
+                changes: JSON.stringify({ before: existingStory }),
+              });
             }
             return jsonResponse({ tenant: getTenantSummary(tenant), deleted: true });
           }
@@ -807,9 +1110,9 @@ export default {
           }
 
           if (request.method === "GET") {
-            const denied = await requireAnyRolePermission(request, env, ["stories:read"]);
-            if (denied) {
-              return denied;
+            const authorization = await requireAnyRolePermission(request, env, ["stories:read"]);
+            if (authorization.error) {
+              return authorization.error;
             }
 
             const chapters = await tenantClient.listChapters(tenant.database_id, storyId);
@@ -817,18 +1120,21 @@ export default {
           }
 
           if (request.method === "POST") {
-            const denied = await requireAnyRolePermission(request, env, [
+            const authorization = await requireAnyRolePermission(request, env, [
               "chapters:insert",
+              "chapters:create",
               "tables:crud:all",
             ]);
-            if (denied) {
-              return denied;
+            if (authorization.error) {
+              return authorization.error;
             }
 
             const body = await readJsonBody<{
               chapter_number: number;
               title: string;
               content?: unknown;
+              status?: string;
+              scheduled_at?: string;
             }>(request);
 
             const chapterNumber = Number(body.chapter_number);
@@ -841,12 +1147,23 @@ export default {
             if (!content) {
               return errorResponse("content is required", 400);
             }
+            const status = normalizeLifecycleStatus(body.status, "draft");
+            const scheduledAt = optionalStringOrNullField(body.scheduled_at);
 
             const chapter = await tenantClient.createChapter(tenant.database_id, {
               story_id: storyId,
               chapter_number: chapterNumber,
               title,
+              status,
+              scheduled_at: scheduledAt,
               content,
+            });
+            await tenantClient.recordAuditLog(tenant.database_id, {
+              actor_id: authorization.identity?.userId ?? null,
+              action: "chapters.create",
+              target_type: "chapter",
+              target_id: chapter.id,
+              changes: JSON.stringify({ after: chapter }),
             });
 
             return jsonResponse({ tenant: getTenantSummary(tenant), chapter }, 201);

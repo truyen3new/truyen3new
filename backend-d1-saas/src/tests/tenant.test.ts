@@ -3,13 +3,46 @@
  */
 
 import { AdminClient, TenantClient } from "../client";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-const TEST_BASE_URL = "http://localhost:8787";
-const TEST_ADMIN_KEY = "test-admin-key-12345";
+const TEST_BASE_URL = loadEnvValue("BACKEND_BASE_URL") ?? "http://localhost:8788";
+const TEST_RUN_ID = crypto.randomUUID().slice(0, 8);
+
+function loadEnvValue(name: string): string | undefined {
+  const envPath = resolve(process.cwd(), "..", ".env");
+  if (!existsSync(envPath)) {
+    return undefined;
+  }
+
+  const content = readFileSync(envPath, "utf8");
+  const match = content.match(new RegExp(`^${name}=([^\r\n]+)$`, "m"));
+  return match?.[1]?.trim();
+}
+
+const TEST_ADMIN_KEY = loadEnvValue("ADMIN_API_KEY") ?? "test-admin-key-12345";
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function createUnsignedJwt(payload: Record<string, unknown>): string {
+  const header = { alg: "none", typ: "JWT" };
+  return `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(JSON.stringify(payload))}.`;
+}
+
+function uniqueSlug(base: string): string {
+  return `${base}-${TEST_RUN_ID}`;
+}
 
 describe("TenantClient", () => {
   let tenant: { id: string; name: string };
   let tenantKey: string;
+  let accessToken: string;
   let client: TenantClient;
 
   beforeAll(async () => {
@@ -21,11 +54,13 @@ describe("TenantClient", () => {
     const result = await admin.provisionTenant("Tenant Test Suite");
     tenant = result.tenant;
     tenantKey = result.tenantKey;
+    accessToken = createUnsignedJwt({ sub: "1001", role: "superadmin" });
 
     client = new TenantClient({
       baseUrl: TEST_BASE_URL,
       tenantId: tenant.id,
       tenantKey,
+      accessToken,
     });
   });
 
@@ -39,7 +74,7 @@ describe("TenantClient", () => {
   test("creates a story", async () => {
     const response = await client.createStory({
       title: "Test Story",
-      slug: "test-story",
+      slug: uniqueSlug("test-story"),
       description: "This is test content",
       cover_url: "https://example.com/cover.jpg",
       status: "ongoing",
@@ -50,14 +85,14 @@ describe("TenantClient", () => {
     expect(response.story).toBeDefined();
     expect(response.story.id).toBeTruthy();
     expect(response.story.title).toBe("Test Story");
-    expect(response.story.slug).toBe("test-story");
+    expect(response.story.slug).toBe(uniqueSlug("test-story"));
     expect(response.story.description).toBe("This is test content");
   });
 
   test("lists stories", async () => {
     await client.createStory({
       title: "Story 1",
-      slug: "story-1",
+      slug: uniqueSlug("story-1"),
       description: "Content 1",
       cover_url: "",
       status: "ongoing",
@@ -66,7 +101,7 @@ describe("TenantClient", () => {
     });
     await client.createStory({
       title: "Story 2",
-      slug: "story-2",
+      slug: uniqueSlug("story-2"),
       description: "Content 2",
       cover_url: "",
       status: "completed",
@@ -83,7 +118,7 @@ describe("TenantClient", () => {
   test("updates a story", async () => {
     const created = await client.createStory({
       title: "Original",
-      slug: "original",
+      slug: uniqueSlug("original"),
       description: "Original description",
       cover_url: "",
       status: "ongoing",
@@ -92,7 +127,7 @@ describe("TenantClient", () => {
     });
     const updated = await client.updateStory(created.story.id, {
       title: "Updated",
-      slug: "updated",
+      slug: uniqueSlug("updated"),
       description: "Updated description",
       cover_url: "",
       status: "completed",
@@ -107,7 +142,7 @@ describe("TenantClient", () => {
   test("deletes a story", async () => {
     const created = await client.createStory({
       title: "To Delete",
-      slug: "to-delete",
+      slug: uniqueSlug("to-delete"),
       description: "Delete me",
       cover_url: "",
       status: "ongoing",
@@ -127,6 +162,7 @@ describe("TenantClient", () => {
       baseUrl: TEST_BASE_URL,
       tenantId: tenant.id,
       tenantKey: "wrong-key",
+      accessToken,
     });
 
     await expect(badClient.listStories()).rejects.toThrow("Unauthorized");

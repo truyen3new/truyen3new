@@ -8,6 +8,7 @@ interface ClientConfig {
   adminKey?: string;
   tenantKey?: string;
   tenantId?: string;
+  accessToken?: string;
 }
 
 export interface TenantInfo {
@@ -27,10 +28,17 @@ export interface Story {
   slug: string;
   description: string;
   cover_url: string;
-  status: string;
+  status: 'draft' | 'pending' | 'published' | 'archived' | 'ongoing' | 'completed';
+  scheduled_at?: string | null;
   view_count: number;
   author: string;
   category: string;
+  genres?: string;
+  tags?: string;
+  artist?: string;
+  translator?: string;
+  source?: string;
+  rank_score?: number;
   created_at: string;
   updated_at: string;
 }
@@ -44,6 +52,16 @@ interface ErrorResponse {
 
 function isErrorResponse(obj: unknown): obj is ErrorResponse {
   return typeof obj === "object" && obj !== null && "error" in obj;
+}
+
+function buildAuthHeaders(config: ClientConfig): Record<string, string> {
+  const headers: Record<string, string> = {};
+
+  if (config.accessToken) {
+    headers.Authorization = `Bearer ${config.accessToken}`;
+  }
+
+  return headers;
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -88,6 +106,7 @@ export class AdminClient {
     const response = await fetch(`${this.config.baseUrl}/tenants`, {
       method: "GET",
       headers: {
+        ...buildAuthHeaders(this.config),
         "X-Admin-Key": this.config.adminKey!,
       },
     });
@@ -113,6 +132,7 @@ export class TenantClient {
     const response = await fetch(`${this.config.baseUrl}/tenants/${this.config.tenantId}`, {
       method: "GET",
       headers: {
+        ...buildAuthHeaders(this.config),
         "X-Tenant-Key": this.config.tenantKey!,
       },
     });
@@ -124,6 +144,7 @@ export class TenantClient {
     const response = await fetch(`${this.config.baseUrl}/tenants/${this.config.tenantId}/stories`, {
       method: "GET",
       headers: {
+        ...buildAuthHeaders(this.config),
         "X-Tenant-Key": this.config.tenantKey!,
       },
     });
@@ -135,6 +156,7 @@ export class TenantClient {
     const response = await fetch(`${this.config.baseUrl}/tenants/${this.config.tenantId}/stories/${storyId}`, {
       method: "GET",
       headers: {
+        ...buildAuthHeaders(this.config),
         "X-Tenant-Key": this.config.tenantKey!,
       },
     });
@@ -147,6 +169,7 @@ export class TenantClient {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...buildAuthHeaders(this.config),
         "X-Tenant-Key": this.config.tenantKey!,
       },
       body: JSON.stringify(story),
@@ -160,6 +183,7 @@ export class TenantClient {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        ...buildAuthHeaders(this.config),
         "X-Tenant-Key": this.config.tenantKey!,
       },
       body: JSON.stringify(story),
@@ -172,6 +196,7 @@ export class TenantClient {
     const response = await fetch(`${this.config.baseUrl}/tenants/${this.config.tenantId}/stories/${storyId}`, {
       method: "DELETE",
       headers: {
+        ...buildAuthHeaders(this.config),
         "X-Tenant-Key": this.config.tenantKey!,
       },
     });
