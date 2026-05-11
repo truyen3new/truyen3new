@@ -662,6 +662,11 @@ export default {
         }
 
         if (path.length === 2 && request.method === "GET") {
+          const denied = await requireAnyRolePermission(request, env, ["stories:read"]);
+          if (denied) {
+            return denied;
+          }
+
           return jsonResponse({ tenant: getTenantSummary(tenant) });
         }
 
