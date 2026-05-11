@@ -3,6 +3,7 @@
 // Notes: Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in env bindings
 
 import { createClient } from '@supabase/supabase-js';
+import { PaymentEventSchema } from '../lib/validators/payment.validator.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -23,7 +24,7 @@ function badRequest(msg = 'Bad Request') {
 export default async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
 
-  // Minimal JSON parse with defensive checks
+  // Parse and validate payload with Zod
   let body: any;
   try {
     body = await req.json();
@@ -31,15 +32,18 @@ export default async (req: Request): Promise<Response> => {
     return badRequest('invalid-json');
   }
 
-  const eventType = body?.type;
-  if (!eventType) return badRequest('missing-type');
+  const parsed = PaymentEventSchema.safeParse(body);
+  if (!parsed.success) {
+    return badRequest('invalid-payload');
+  }
+
+  const eventType = parsed.data.type;
 
   try {
     if (eventType === 'payment_webhook') {
       // Example payload: { type: 'payment_webhook', data: { user_id, amount, provider, provider_event } }
-      const data = body.data || {};
+      const data = parsed.data.data;
       const userId = data.user_id;
-      if (!userId) return badRequest('missing-user-id');
 
       // Validate provider signature here (placeholder). Keep validation light to avoid blocking.
       // Validate signature header if present.
@@ -57,7 +61,7 @@ export default async (req: Request): Promise<Response> => {
 
     if (eventType === 'daily_checkin') {
       // Example payload: { type: 'daily_checkin', data: { user_id } }
-      const userId = body?.data?.user_id;
+      const userId = parsed.data.data.user_id;
       if (!userId) return badRequest('missing-user-id');
 
       // Idempotent reward grant: upsert into daily_checkins and add reward once per day
