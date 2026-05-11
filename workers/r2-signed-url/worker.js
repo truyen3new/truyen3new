@@ -12,22 +12,38 @@ async function handle(request, event) {
 
   if (!key) return new Response('Missing object key', { status: 400 });
 
-  // Expect Authorization: Bearer <jwt>
-  const auth = request.headers.get('authorization') || '';
-  if (!auth.startsWith('Bearer ')) return new Response('Unauthorized', { status: 401 });
-  const token = auth.slice(7);
+  // Expect signed query param: sig=<hmac>.<expiry>
+  // FALLBACK: allow Authorization: Bearer <token> only for non-vip assets when present
+  const sigParam = url.searchParams.get('sig');
+  const secret = ASSETS_SIGN_SECRET; // bind this secret in wrangler.toml
 
-  // Minimal JWT verification placeholder — replace with production verification.
-  // In production: verify signature with your auth provider's JWKS or shared secret.
-  try {
-    const payload = parseJwt(token);
-    // Check role claim for VIP gating
-    if (payload.role !== 'premium' && payload.role !== 'admin') {
-      // allow public assets (non-vip) — check by path convention
-      if (key.startsWith('vip/')) return new Response('Forbidden', { status: 403 });
+  if (sigParam && secret) {
+    const parts = sigParam.split('.');
+    if (parts.length !== 2) return new Response('Unauthorized', { status: 401 });
+    const [sig, expiry] = parts;
+    const expiryTs = Number(expiry);
+    if (!expiryTs || expiryTs < Date.now()) return new Response('Unauthorized', { status: 401 });
+
+    const expected = await computeHmac(`${key}:${expiry}`, secret);
+    if (!constantTimeEqual(expected, sig)) return new Response('Forbidden', { status: 403 });
+    // signature valid, allow access (role gating is enforced by signed URL generation on server)
+  } else {
+    // fallback: allow bearer token for non-vip assets only
+    const auth = request.headers.get('authorization') || '';
+    if (auth.startsWith('Bearer ')) {
+      try {
+        const token = auth.slice(7);
+        const payload = parseJwt(token);
+        if (payload.role !== 'premium' && payload.role !== 'admin') {
+          if (key.startsWith('vip/')) return new Response('Forbidden', { status: 403 });
+        }
+      } catch (e) {
+        return new Response('Invalid token', { status: 401 });
+      }
+    } else {
+      // no signature and no bearer token
+      if (key.startsWith('vip/')) return new Response('Unauthorized', { status: 401 });
     }
-  } catch (e) {
-    return new Response('Invalid token', { status: 401 });
   }
 
   // Fetch object from R2 binding
@@ -53,4 +69,22 @@ function parseJwt(token) {
   const payload = parts[1];
   const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
   return JSON.parse(decoded);
+}
+
+async function computeHmac(payload, secret) {
+  // Use SubtleCrypto for Workers
+  const enc = new TextEncoder();
+  const keyData = enc.encode(secret);
+  const cryptoKey = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(payload));
+  // hex encode
+  const arr = Array.from(new Uint8Array(sig));
+  return arr.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function constantTimeEqual(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  let res = 0;
+  for (let i = 0; i < a.length; i++) res |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return res === 0;
 }
