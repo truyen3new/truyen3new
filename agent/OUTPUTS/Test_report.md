@@ -1,27 +1,24 @@
-# Test Report: Comic Platform Architecture Review
+# Test Report: CMS Refactor Validation Plan
 
 Date: 2026-05-11
 
-Scope: Cloudflare D1 schema, Worker RBAC middleware, SQLite triggers, and R2 delivery strategy.
+## Scope
 
-## Result
+- Verify lifecycle transitions for comics and chapters.
+- Verify Worker RBAC boundaries and ownership checks.
+- Verify Smart Upload ordering, conversion, and cache invalidation.
+- Verify audit logging and draft recovery behavior.
 
-- Design-level validation: PASS
-- Runtime execution: NOT RUN
+## Validation Status
 
-## What Was Checked
+- This workflow produced a design/package of artifacts only.
+- No runtime migration or Worker execution was run in this pass.
 
-- The schema keeps all relational state in D1.
-- The Worker is the only place where access control is enforced.
-- The trigger plan does not attempt to call external storage APIs.
-- Premium and free asset delivery are separated cleanly.
+## Required Test Cases
 
-## Gaps
-
-- No live D1 migration was executed in this workflow.
-- No Worker build or unit test run was performed because this workflow produced architecture artifacts only.
-
-## Recommendation
-
-- Apply the migration and middleware to source next.
-- Then run D1 migration validation, RBAC route tests, and R2 signing tests in staging.
+- Draft -> pending -> published -> archived transitions should persist in D1.
+- Employee requests should succeed for insert/update and fail for delete/publish.
+- Multi-file uploads should compute stable order_index from filenames.
+- Replaced assets should trigger cache purge and new R2 key persistence.
+- Comment submissions should be filtered before persistence.
+- Any write/delete should emit an audit_logs record.

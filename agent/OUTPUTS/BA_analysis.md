@@ -1,30 +1,32 @@
-# BA Analysis: Cloudflare-Native Comic Platform
+# BA Analysis: Professional Comic Management System
 
 Date: 2026-05-11
-Scope: Cloudflare Workers + D1 + R2
+Scope: Cloudflare Workers + D1 + R2 + Frontend Draft Recovery
 
 Business Goal
 
-- Keep structured comic data in D1.
-- Keep images and covers in R2.
-- Keep authorization in the Worker layer.
+- Turn the current create-comic flow into a production-grade CMS with lifecycle control, safer publishing, and asset integrity.
+- Keep structured comic data in D1, binaries in R2, and authorization in Worker middleware.
+- Reduce content loss, moderation risk, and operational drift for content teams.
 
-Primary Risks
+Primary Business Risks
 
-- Premium content exposure breaks revenue and trust.
-- Treating R2 like a database creates maintenance and audit failures.
-- Client-side role checks create privilege escalation and IDOR risk.
-- Deleting DB rows without deleting R2 objects leaks storage and content.
+- Content can be published early or out of order without explicit lifecycle state.
+- Multi-file uploads can become inconsistent if page ordering depends on manual input.
+- Asset churn can leave stale CDN responses or orphaned R2 objects.
+- Write operations without audit records weaken governance and incident response.
+- Client-side role checks or unbuffered editing can cause privilege escalation or data loss.
 
 Priority Order
 
-1. Ship the D1 schema for users, roles, comics, chapters, pages, comments, and reading history.
-2. Enforce RBAC in Worker middleware with server-side ownership checks.
-3. Add SQLite triggers for timestamp updates and chapter-driven cleanup.
-4. Deliver premium assets with signed URLs and free assets with public CDN paths.
+1. Extend the D1 schema for comic and chapter state management, metadata enrichment, audit logging, and search indexing.
+2. Introduce Smart Upload orchestration for bulk image handling, deterministic ordering, and compression.
+3. Refine RBAC so superadmin, admin, employee, and user each have explicit CMS permissions.
+4. Add moderation, draft persistence, and full-text filtering for a scalable community workflow.
 
-Constraint Set
+Success Criteria
 
-- R2 stores object keys only, never queryable text.
-- RBAC must live in Workers, not in DB triggers or object storage policies.
-- Worker code must delete physical R2 objects after DB delete succeeds.
+- Editors can save drafts, schedule releases, and recover work after browser or network interruption.
+- Employees can add and update chapter content without gaining delete or publish power.
+- Admins can manage lifecycle and review audit events without direct database trust.
+- Search remains responsive at scale through indexed metadata and FTS-backed lookup paths.

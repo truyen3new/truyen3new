@@ -1,45 +1,40 @@
-# TechLead Architecture: Cloudflare Comic Platform
+# TechLead Architecture: Enterprise Comic Management System
 
 Goal
 
-- Keep structured data in D1.
-- Keep blobs in R2.
-- Keep authorization in Worker middleware.
+- Convert the current comic creation surface into a CMS with explicit lifecycle, auditability, and safe asset orchestration.
+- Keep D1 as the system of record, R2 as the binary store, Workers as the policy and execution plane, and the frontend as a draft-friendly UI shell.
 
-Rules
+Architecture Boundaries
 
-1. D1 is the system of record for users, roles, comics, chapters, pages, comments, and reading history.
-2. R2 stores only object keys plus binary images.
-3. RBAC runs in Workers, not in triggers or storage policies.
-4. SQLite triggers may maintain timestamps and relational cleanup only.
-5. The Worker must delete physical R2 objects after a successful DB delete.
+1. D1 owns comics, chapters, pages, comments, reading history, drafts, and audit logs.
+2. R2 stores only images and object keys; it never stores lifecycle state or rich metadata.
+3. Workers resolve identity, authorize actions, transform uploads, purge cache, and append audit records.
+4. The frontend uses localStorage for immediate draft recovery and D1 for durable draft buffering.
+5. SQLite triggers are limited to timestamp maintenance, relational cleanup, and indexing support.
 
-Role Model
+Lifecycle Model
 
-- superadmin: full CRUD, role administration, R2 lifecycle control.
-- admin: comic/chapter metadata, upload/delete assets, moderate comments.
-- employee: insert/upload chapters and pages, edit metadata, no deletes.
-- user: read-only access plus own comments and reading history.
+- Comics and chapters support `draft`, `pending`, `published`, and `archived` states.
+- `scheduled_at` enables future publishing without overloading the editor UI.
+- `rank_score` supports editorial ordering and recommendation workflows.
+- `genres`, `tags`, `artist`, `translator`, and `source` enrich discoverability and attribution.
 
-Delivery Model
+Operational Model
 
-- Free assets: public CDN path, aggressive caching.
-- Premium assets: short-lived HMAC-signed URL from the Worker.
-- Signature validation happens before the object is fetched from R2.
+- Smart Upload receives a file batch, extracts order from filenames, normalizes images to WebP, and stores the resulting objects in R2.
+- Cache purges are initiated from the Worker whenever a referenced object is replaced.
+- Audit logging is asynchronous from the caller perspective but must be recorded for every write and delete path.
+- Profanity filtering runs before comment persistence so moderation decisions are centralized and repeatable.
 
-Trigger Model
+Indexing Model
 
-- `reading_history.updated_at` refreshes on page-turn updates.
-- Chapter deletes clear dependent pages and comments.
-- Foreign keys still enforce parent-child integrity.
+- Use composite indexes for status, scheduling, comic ownership, and chapter ordering.
+- Use FTS on title and tags to keep catalog search responsive at scale.
+- Prefer JSON text columns for tags and genres only when normalized rows are unnecessary.
 
-Implementation Artifacts
+Key Risks
 
-- `agent/OUTPUTS/Comic_platform_implementation.md` contains the D1 migration and Worker boilerplate.
-- `agent/OUTPUTS/Security_hardening.md` contains the release checklist.
-
-Warning
-
-- Do not trust client-supplied role fields.
-- Do not encode structured text in R2.
-- Do not expect D1 triggers to call the R2 API.
+- Never let client-provided role values drive authorization.
+- Never rely on D1 triggers to call R2 or Cloudflare APIs.
+- Never allow delete paths to skip audit logging or cache invalidation.
