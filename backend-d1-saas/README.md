@@ -52,6 +52,17 @@ The control-plane D1 database is bound as `CONTROL_DB`.
 
 Dev URL: when running `wrangler dev` the worker is available on `http://127.0.0.1:8787` (the repository convention uses `http://localhost:8787` for `BACKEND_D1_SAAS_URL`).
 
+## Comic Platform Extension (D1 + R2)
+
+- `migrations/0002_comic_platform.sql` adds relational tables for roles, users, comics, chapters, pages, comments, and reading history.
+- The same migration adds triggers for reading history timestamp refresh and chapter child metadata cleanup.
+- `src/lib/rbac.ts` provides Worker-side role resolution and permission/ownership guards.
+
+Important:
+
+- R2 should only store static objects. D1 stores all queryable metadata.
+- Database triggers cannot call the R2 API. Workers must delete physical R2 objects after successful DB deletes.
+
 ## Testing
 
 Run smoke tests against a live worker:
