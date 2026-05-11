@@ -28,10 +28,10 @@ CREATE POLICY IF NOT EXISTS comments_insert_auth ON public.comments FOR INSERT
   WITH CHECK (auth.uid() IS NOT NULL);
 
 CREATE POLICY IF NOT EXISTS comments_update_owner_or_admin ON public.comments FOR UPDATE
-  USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin'));
+  USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
 
 CREATE POLICY IF NOT EXISTS comments_delete_owner_or_admin ON public.comments FOR DELETE
-  USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin'));
+  USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
 
 -- Ratings RLS: allow read on published stories; inserts require auth; updates/deletes owner or admin
 CREATE POLICY IF NOT EXISTS ratings_select_published ON public.ratings FOR SELECT
@@ -45,10 +45,10 @@ CREATE POLICY IF NOT EXISTS ratings_insert_auth ON public.ratings FOR INSERT
   WITH CHECK (auth.uid() IS NOT NULL);
 
 CREATE POLICY IF NOT EXISTS ratings_update_owner_or_admin ON public.ratings FOR UPDATE
-  USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin'));
+  USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
 
 CREATE POLICY IF NOT EXISTS ratings_delete_owner_or_admin ON public.ratings FOR DELETE
-  USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin'));
+  USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
 
 -- IDOR protection: explicit function to validate chapter access by id
 CREATE OR REPLACE FUNCTION public.can_read_chapter(_chapter_id uuid, _uid uuid)

@@ -59,7 +59,7 @@ CREATE POLICY IF NOT EXISTS read_vip_chapters_premium_admin
     vip_content = TRUE
     AND EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('premium', 'admin')
+      WHERE p.id = auth.uid() AND p.role IN ('premium', 'admin', 'superadmin')
     )
   );
 
