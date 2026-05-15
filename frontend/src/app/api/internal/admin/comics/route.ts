@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Admin-Key": String(backendAdminKey),
+          "x-admin-key": String(backendAdminKey),
         },
         body: JSON.stringify({ name: title }),
       });
@@ -147,7 +147,8 @@ export async function POST(request: NextRequest) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Tenant-Key": String(tenantKey),
+          "x-admin-key": String(backendAdminKey),
+          "x-tenant-key": String(tenantKey),
         },
         body: JSON.stringify({
           title,
@@ -159,22 +160,39 @@ export async function POST(request: NextRequest) {
           category: JSON.stringify(categoryArray),
         }),
       });
-
-      storyData = await storyResponse.json();
+      
+      if (storyResponse.ok) {
+        try {
+          storyData = await storyResponse.json();
+        } catch (parseError) {
+          storyData = { error: "Invalid JSON response from backend" };
+        }
+      } else {
+        // Handle error responses
+        const contentType = storyResponse.headers.get("content-type");
+        if (contentType?.includes("application/json")) {
+          try {
+            storyData = await storyResponse.json();
+          } catch {
+            storyData = { error: `HTTP ${storyResponse.status}` };
+          }
+        } else {
+          storyData = { error: `HTTP ${storyResponse.status}` };
+        }
+      }
 
       if (!storyResponse.ok || storyData.error || !storyData.story) {
         if (!allowDevFallback || process.env.NODE_ENV === "production") {
           return NextResponse.json(
             { error: storyData.error || `HTTP ${storyResponse.status}` },
-            { status: storyResponse.status },
+            { status: storyResponse.status || 500 },
           );
         }
 
+        // Dev fallback: use synthesized story data
         const randomId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `dev-${Date.now()}`;
-        tenantId = randomId;
-        tenantKey = `dev-${randomId}`;
         const now = new Date().toISOString();
         storyData = {
           story: {

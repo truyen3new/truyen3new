@@ -1,25 +1,122 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { GripVertical, Plus, Search, Upload } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createComic,
-  createComicChapter,
-  listComicContexts,
-  saveComicContext,
-  type ComicContext,
-  uploadChapterImages,
-  uploadComicCover,
-} from "@/services/comic.service";
+  AlertTriangle,
+  Ban,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  FileImage,
+  Filter,
+  GripVertical,
+  Layers3,
+  PencilLine,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Sparkles,
+  Tags,
+  Trash2,
+  Upload,
+  Wand2,
+} from "lucide-react";
+import { toast } from "sonner";
+import { useAuth } from "@/modules/auth/AuthContext";
+import { useAutoSave } from "@/hooks/useAutoSave";
+import {
+  ComicChapterFormSchema,
+  ComicCmsFormSchema,
+  ComicModerationSchema,
+  type ComicChapterFormValues,
+  type ComicModerationState,
+  type ComicReportedComment,
+  type ComicStatus,
+  type ComicCmsFormValues,
+} from "@/lib/validation/comicCmsSchemas";
+import {
+  clearComicDraft,
+  createComicChapterFromFiles,
+  createComicFromMetadata,
+  deleteComic,
+  listComicModerationState,
+  loadComicCatalog,
+  loadComicCatalogFiltered,
+  loadComicDraft,
+  loadComicRecord,
+  proxiedR2ImageUrl,
+  recordComicAudit,
+  requestComicCachePurge,
+  saveComicDraft,
+  saveComicModerationState,
+  sortFilesByFilename,
+  updateComicRecord,
+  type ComicCatalogFilters,
+  type ComicCmsChapterRecord,
+  type ComicCmsRecord,
+} from "@/services/comicCms.service";
+import { uploadComicCover } from "@/services/comic.service";
 
-type SubTab = "create_comic" | "add_chapter";
+type TabKey = "catalog" | "editor" | "chapters" | "moderation";
 
-type ImageEntry = {
+type PageDraft = {
   id: string;
   file: File;
   order: number;
-  preview: string;
+  previewUrl: string;
+  sizeBytes: number;
+  fileName: string;
 };
+
+const DEFAULT_FORM: ComicCmsFormValues = {
+  title: "",
+  author: "",
+  artist: "",
+  translator: "",
+  source: "",
+  description: "",
+  status: "draft",
+  scheduledAt: null,
+  genres: [],
+  tags: [],
+  rankScore: 0,
+  coverUrl: "",
+};
+
+const DEFAULT_CHAPTER_FORM: ComicChapterFormValues = {
+  chapterNumber: 1,
+  title: "",
+  status: "draft",
+  scheduledAt: null,
+};
+
+const DEFAULT_MODERATION: ComicModerationState = ComicModerationSchema.parse({
+  keywords: ["spoiler", "pirated", "leak"],
+  reportedComments: [
+    {
+      id: "report-demo-1",
+      comicId: "demo-comic",
+      commentId: "comment-demo-1",
+      reporter: "moderator.queue@lightstory.local",
+      comment: "This chapter was mirrored from an unofficial source.",
+      status: "open",
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: "report-demo-2",
+      comicId: "demo-comic",
+      commentId: "comment-demo-2",
+      reporter: "community.bot@lightstory.local",
+      comment: "Contains repeated spoiler paragraphs in the first frame.",
+      status: "open",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+});
+
+const MAX_PAGE_SIZE_BYTES = 2 * 1024 * 1024;
 
 function slugify(value: string): string {
   return (
@@ -32,704 +129,1649 @@ function slugify(value: string): string {
   );
 }
 
-function normalizeOrder(images: ImageEntry[]): ImageEntry[] {
-  return images.map((entry, index) => ({ ...entry, order: index + 1 }));
+function uniqueTokens(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function parseCategoryInput(input: string): string[] {
-  const chunks = input
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
+function normalizePageOrder(pages: PageDraft[]): PageDraft[] {
+  return pages.map((page, index) => ({ ...page, order: index + 1 }));
+}
 
-  return Array.from(new Set(chunks));
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function formatDateTimeLocalInput(value: string | null | undefined): string {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const pad = (input: number) => String(input).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function parseDateTimeLocalInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toISOString();
+}
+
+function toFormState(record: ComicCmsRecord): ComicCmsFormValues {
+  return ComicCmsFormSchema.parse({
+    title: record.title,
+    author: record.author,
+    artist: record.artist,
+    translator: record.translator,
+    source: record.source,
+    description: record.description,
+    status: record.status,
+    scheduledAt: record.scheduledAt,
+    genres: record.genres,
+    tags: record.tags,
+    rankScore: record.rankScore,
+    coverUrl: record.coverUrl,
+  });
+}
+
+function statusTone(status: ComicStatus): string {
+  switch (status) {
+    case "published":
+      return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20";
+    case "pending":
+      return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/20";
+    case "archived":
+      return "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/20";
+    default:
+      return "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/20";
+  }
+}
+
+function MetricPill({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-left backdrop-blur">
+      <div className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-300">{label}</div>
+      <div className="mt-1 text-2xl font-black text-white">{value}</div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: ComicStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.3em] ${statusTone(status)}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function Panel({
+  title,
+  subtitle,
+  icon,
+  actions,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  icon: React.ReactNode;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-950/80 shadow-xl shadow-slate-950/5 backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-200/80 dark:border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400">
+            {icon}
+            {title}
+          </div>
+          {subtitle ? <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p> : null}
+        </div>
+        {actions}
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function ChipEditor({
+  label,
+  helper,
+  values,
+  onChange,
+  placeholder,
+  icon,
+}: {
+  label: string;
+  helper: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder: string;
+  icon: React.ReactNode;
+}) {
+  const [draft, setDraft] = useState("");
+
+  const commit = useCallback(() => {
+    const tokens = draft
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (tokens.length === 0) return;
+    onChange(uniqueTokens([...values, ...tokens]));
+    setDraft("");
+  }, [draft, onChange, values]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">
+          {icon}
+          {label}
+        </label>
+        <span className="text-[10px] font-semibold text-slate-400">{helper}</span>
+      </div>
+      <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 p-3 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {values.length === 0 ? (
+            <span className="text-xs text-slate-400">No entries yet.</span>
+          ) : (
+            values.map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onChange(values.filter((item) => item !== value))}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-xs font-bold text-slate-700 dark:text-slate-200"
+              >
+                {value}
+                <Trash2 size={12} className="text-slate-400" />
+              </button>
+            ))
+          )}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === ",") {
+                event.preventDefault();
+                commit();
+              }
+            }}
+            onBlur={commit}
+            placeholder={placeholder}
+            className="min-w-0 flex-1 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
+          />
+          <button
+            type="button"
+            onClick={commit}
+            className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export const ComicManagementTab: React.FC = () => {
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>("create_comic");
+  const { role } = useAuth();
+  const canManageAll = role === "superadmin" || role === "admin";
+  const canModerate = canManageAll || role === "employee";
 
-  const [comicLibrary, setComicLibrary] = useState<ComicContext[]>([]);
-  const [selectedComicId, setSelectedComicId] = useState("");
-  const [comicSearch, setComicSearch] = useState("");
-  const [comicCategoryFilter, setComicCategoryFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState<TabKey>("catalog");
+  const [catalog, setCatalog] = useState<ComicCmsRecord[]>(() => loadComicCatalog());
+  const [selectedComicId, setSelectedComicId] = useState<string | null>(catalog[0]?.id ?? null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filters, setFilters] = useState<ComicCatalogFilters>({
+    search: "",
+    genre: "",
+    status: "all",
+    author: "",
+  });
 
-  const [createTitle, setCreateTitle] = useState("");
-  const [createDescription, setCreateDescription] = useState("");
-  const [createAuthor, setCreateAuthor] = useState("");
-  const [createStatus, setCreateStatus] = useState<"ongoing" | "completed">("ongoing");
-  const [createCategoryInput, setCreateCategoryInput] = useState("");
-  const [createCover, setCreateCover] = useState<File | null>(null);
-  const [createLoading, setCreateLoading] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createWarning, setCreateWarning] = useState<string | null>(null);
+  const [formValues, setFormValues] = useState<ComicCmsFormValues>(DEFAULT_FORM);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string>("");
+  const [formBusy, setFormBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const [chapterTitle, setChapterTitle] = useState("");
-  const [chapterNumber, setChapterNumber] = useState(1);
-  const [chapterImages, setChapterImages] = useState<ImageEntry[]>([]);
-  const [chapterLoading, setChapterLoading] = useState(false);
+  const [chapterValues, setChapterValues] = useState<ComicChapterFormValues>(DEFAULT_CHAPTER_FORM);
+  const [chapterPages, setChapterPages] = useState<PageDraft[]>([]);
+  const [chapterBusy, setChapterBusy] = useState(false);
   const [chapterError, setChapterError] = useState<string | null>(null);
-  const [orderConfirmed, setOrderConfirmed] = useState(false);
+  const [pageDragId, setPageDragId] = useState<string | null>(null);
+  const chapterInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [isDropzoneActive, setIsDropzoneActive] = useState(false);
-  const [dragImageId, setDragImageId] = useState<string | null>(null);
-
-  const chapterImagesRef = useRef<ImageEntry[]>([]);
-
-  const generatedSlug = useMemo(() => slugify(createTitle), [createTitle]);
+  const [moderation, setModeration] = useState<ComicModerationState>(() => {
+    const saved = listComicModerationState();
+    return saved.reportedComments.length > 0 ? saved : DEFAULT_MODERATION;
+  });
+  const [keywordInput, setKeywordInput] = useState("");
+  const [moderationBusy, setModerationBusy] = useState(false);
 
   const selectedComic = useMemo(
-    () => comicLibrary.find((comic) => comic.id === selectedComicId) ?? null,
-    [comicLibrary, selectedComicId],
+    () => (selectedComicId ? catalog.find((record) => record.id === selectedComicId) ?? null : null),
+    [catalog, selectedComicId],
   );
 
-  const availableCategoryFilters = useMemo(() => {
-    const values = new Set<string>();
-    comicLibrary.forEach((comic) => comic.category.forEach((item) => values.add(item)));
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [comicLibrary]);
+  const draftKey = selectedComicId ?? "new";
+  const autoSave = useAutoSave(`comic-cms:${draftKey}`, formValues, 1250);
 
-  const filteredComics = useMemo(() => {
-    const needle = comicSearch.trim().toLowerCase();
+  const selectedComicLabel = selectedComic ? `${selectedComic.title} · ${selectedComic.slug}` : "New comic draft";
 
-    return comicLibrary.filter((comic) => {
-      const categoryMatch =
-        comicCategoryFilter === "all" || comic.category.some((item) => item.toLowerCase() === comicCategoryFilter.toLowerCase());
-
-      if (!categoryMatch) return false;
-      if (!needle) return true;
-
-      return (
-        comic.title.toLowerCase().includes(needle) ||
-        comic.slug.toLowerCase().includes(needle) ||
-        comic.author.toLowerCase().includes(needle)
-      );
-    });
-  }, [comicLibrary, comicSearch, comicCategoryFilter]);
+  const filteredCatalog = useMemo(() => loadComicCatalogFiltered(catalog, filters), [catalog, filters]);
+  const sortedCatalog = useMemo(
+    () => [...filteredCatalog].sort((left, right) => right.lastUpdatedAt.localeCompare(left.lastUpdatedAt)),
+    [filteredCatalog],
+  );
+  const genreOptions = useMemo(
+    () => uniqueTokens(catalog.flatMap((record) => record.genres)).sort((left, right) => left.localeCompare(right)),
+    [catalog],
+  );
+  const authorOptions = useMemo(
+    () => uniqueTokens(catalog.map((record) => record.author)).sort((left, right) => left.localeCompare(right)),
+    [catalog],
+  );
+  const selectedChapters = selectedComic?.chapters ?? [];
+  const totalPages = useMemo(
+    () => selectedChapters.reduce((total, chapter) => total + chapter.pages.length, 0),
+    [selectedChapters],
+  );
 
   useEffect(() => {
-    const existing = listComicContexts();
-    setComicLibrary(existing);
-    if (existing.length > 0) {
-      setSelectedComicId(existing[0].id);
+    if (catalog.length > 0 && !selectedComicId) {
+      setSelectedComicId(catalog[0].id);
     }
-  }, []);
+    if (catalog.length === 0 && selectedComicId) {
+      setSelectedComicId(null);
+    }
+  }, [catalog, selectedComicId]);
 
   useEffect(() => {
-    chapterImagesRef.current = chapterImages;
-  }, [chapterImages]);
+    if (selectedComic) {
+      const baseline = toFormState(selectedComic);
+      const restored = autoSave.restore();
+      if (restored) {
+        const merged = ComicCmsFormSchema.safeParse({ ...baseline, ...restored });
+        if (merged.success) setFormValues(merged.data);
+      }
+      return;
+    }
+
+    const restored = autoSave.restore();
+    const nextDraftResult = ComicCmsFormSchema.safeParse({
+      ...DEFAULT_FORM,
+      ...(restored ?? {}),
+    });
+    setFormValues(nextDraftResult.success ? nextDraftResult.data : DEFAULT_FORM);
+    setCoverFile(null);
+  }, [draftKey, selectedComic]);
+
+  useEffect(() => {
+    if (!coverFile) {
+      setCoverPreview(selectedComic ? proxiedR2ImageUrl(selectedComic.coverUrl) : formValues.coverUrl ? proxiedR2ImageUrl(formValues.coverUrl) : "");
+      return;
+    }
+
+    const url = URL.createObjectURL(coverFile);
+    setCoverPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [coverFile, formValues.coverUrl, selectedComic]);
+
+  useEffect(() => {
+    if (!selectedComicId) return;
+    const existing = selectedComic ?? loadComicRecord(selectedComicId);
+    if (existing) {
+      setChapterValues((current) => ({
+        ...current,
+        status: existing.status,
+      }));
+    }
+  }, [selectedComic, selectedComicId]);
+
+  useEffect(() => {
+    saveComicModerationState(moderation);
+  }, [moderation]);
 
   useEffect(() => {
     return () => {
-      chapterImagesRef.current.forEach((entry) => URL.revokeObjectURL(entry.preview));
+      chapterPages.forEach((page) => URL.revokeObjectURL(page.previewUrl));
     };
+  }, [chapterPages]);
+
+  const refreshCatalog = useCallback((showToast = false) => {
+    setRefreshing(true);
+    try {
+      const data = loadComicCatalog();
+      setCatalog(data);
+      if (showToast) toast.success("Catalog refreshed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to refresh catalog");
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
-  const appendChapterImages = (files: File[]) => {
-    if (files.length === 0) return;
+  const loadNewComicDraft = useCallback(() => {
+    setSelectedComicId(null);
+    setFormValues(loadComicDraft("new") ?? DEFAULT_FORM);
+    setCoverFile(null);
+    setFormError(null);
+    setChapterError(null);
+    setActiveTab("editor");
+    toast.info("Editing a new comic draft");
+  }, []);
 
-    setChapterImages((prev) => {
-      const next = files.map((file, index) => ({
-        id: crypto.randomUUID(),
-        file,
-        order: prev.length + index + 1,
-        preview: URL.createObjectURL(file),
-      }));
-      return [...prev, ...next];
-    });
-    setOrderConfirmed(false);
-  };
+  const openComic = useCallback((comicId: string, tab: TabKey = "editor") => {
+    setSelectedComicId(comicId);
+    setActiveTab(tab);
+    setFormError(null);
+    setChapterError(null);
+    const stored = loadComicRecord(comicId);
+    if (stored) {
+      setFormValues(toFormState(stored));
+    }
+  }, []);
 
-  const removeChapterImage = (id: string) => {
-    setChapterImages((prev) => {
-      const target = prev.find((item) => item.id === id);
-      if (target) {
-        URL.revokeObjectURL(target.preview);
-      }
-      return normalizeOrder(prev.filter((item) => item.id !== id));
-    });
-    setOrderConfirmed(false);
-  };
+  const applySavedRecord = useCallback(
+    (record: ComicCmsRecord) => {
+      setCatalog((prev) => {
+        const filtered = prev.filter((item) => item.id !== record.id);
+        return [record, ...filtered].sort((a, b) => b.lastUpdatedAt.localeCompare(a.lastUpdatedAt));
+      });
+      setSelectedComicId(record.id);
+      setFormValues(toFormState(record));
+    },
+    [],
+  );
 
-  const clearChapterImages = () => {
-    setChapterImages((prev) => {
-      prev.forEach((entry) => URL.revokeObjectURL(entry.preview));
+  const resetChapterPages = useCallback(() => {
+    setChapterPages((current) => {
+      current.forEach((page) => URL.revokeObjectURL(page.previewUrl));
       return [];
     });
-    setOrderConfirmed(false);
-  };
+  }, []);
 
-  const moveByDrag = (fromId: string, toId: string) => {
+  const addChapterFiles = useCallback((incomingFiles: File[]) => {
+    if (incomingFiles.length === 0) return;
+
+    const sorted = sortFilesByFilename(incomingFiles);
+    setChapterPages((current) => {
+      const next = sorted.map((file, index) => ({
+        id: crypto.randomUUID(),
+        file,
+        order: current.length + index + 1,
+        previewUrl: URL.createObjectURL(file),
+        sizeBytes: file.size,
+        fileName: file.name,
+      }));
+      return [...current, ...next];
+    });
+    setChapterError(null);
+  }, []);
+
+  const removeChapterPage = useCallback((pageId: string) => {
+    setChapterPages((current) => {
+      const next = current.filter((page) => page.id !== pageId);
+      current.filter((page) => page.id === pageId).forEach((page) => URL.revokeObjectURL(page.previewUrl));
+      return normalizePageOrder(next);
+    });
+  }, []);
+
+  const moveChapterPage = useCallback((fromId: string, toId: string) => {
     if (fromId === toId) return;
 
-    setChapterImages((prev) => {
-      const fromIndex = prev.findIndex((item) => item.id === fromId);
-      const toIndex = prev.findIndex((item) => item.id === toId);
-      if (fromIndex === -1 || toIndex === -1) return prev;
+    setChapterPages((current) => {
+      const fromIndex = current.findIndex((page) => page.id === fromId);
+      const toIndex = current.findIndex((page) => page.id === toId);
+      if (fromIndex === -1 || toIndex === -1) return current;
 
-      const next = [...prev];
-      const [dragged] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, dragged);
-      return normalizeOrder(next);
+      const next = [...current];
+      const [picked] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, picked);
+      return normalizePageOrder(next);
     });
+  }, []);
 
-    setOrderConfirmed(false);
-  };
-
-  const moveImageByDirection = (id: string, direction: "up" | "down") => {
-    setChapterImages((prev) => {
-      const index = prev.findIndex((item) => item.id === id);
-      if (index === -1) return prev;
+  const moveChapterPageByDirection = useCallback((pageId: string, direction: "up" | "down") => {
+    setChapterPages((current) => {
+      const index = current.findIndex((page) => page.id === pageId);
+      if (index === -1) return current;
 
       const target = direction === "up" ? index - 1 : index + 1;
-      if (target < 0 || target >= prev.length) return prev;
+      if (target < 0 || target >= current.length) return current;
 
-      const next = [...prev];
+      const next = [...current];
       const [picked] = next.splice(index, 1);
       next.splice(target, 0, picked);
-      return normalizeOrder(next);
+      return normalizePageOrder(next);
     });
+  }, []);
 
-    setOrderConfirmed(false);
-  };
+  const handlePrimarySubmit = useCallback(async () => {
+    setFormError(null);
 
-  const handleCreateComic = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setCreateError(null);
-    setCreateWarning(null);
-
-    if (!createCover) {
-      setCreateError("Cover image is required.");
+    const parsed = ComicCmsFormSchema.safeParse(formValues);
+    if (!parsed.success) {
+      setFormError(parsed.error.issues[0]?.message ?? "Fix the comic metadata before saving.");
       return;
     }
 
-    if (!createTitle.trim()) {
-      setCreateError("Title is required.");
-      return;
-    }
-
-    if (!createAuthor.trim()) {
-      setCreateError("Author is required.");
-      return;
-    }
-
-    setCreateLoading(true);
-
+    setFormBusy(true);
     try {
-      const category = parseCategoryInput(createCategoryInput);
+      if (selectedComic) {
+        let nextCoverUrl = selectedComic.coverUrl;
+        if (coverFile) {
+          nextCoverUrl = await uploadComicCover(coverFile);
+        }
 
-      // If R2 bucket is not configured, skip upload and continue with empty coverUrl.
-      // This makes the admin form usable in local/dev where R2 env vars may be absent.
-      let coverUrl = "";
-      const coversBucket = process.env.NEXT_PUBLIC_R2_BUCKET_COVERS;
-      if (coversBucket && createCover) {
-        coverUrl = await uploadComicCover(createCover);
-      } else if (!coversBucket && createCover) {
-        setCreateWarning(
-          "R2 covers bucket not configured — cover upload skipped. Configure NEXT_PUBLIC_R2_BUCKET_COVERS to enable uploads.",
-        );
+        const updated: ComicCmsRecord = {
+          ...selectedComic,
+          ...parsed.data,
+          coverUrl: nextCoverUrl,
+          status: parsed.data.status,
+          lastUpdatedAt: new Date().toISOString(),
+        };
+
+        const saved = await updateComicRecord(updated);
+        await recordComicAudit("comic.update", {
+          comicId: saved.id,
+          status: saved.status,
+          title: saved.title,
+          target_user_id: selectedComic.storyId,
+        });
+        applySavedRecord(saved);
+        clearComicDraft(selectedComic.id);
+        autoSave.clear();
+        toast.success("Comic updated");
+      } else if (canManageAll) {
+        const created = await createComicFromMetadata({
+          ...parsed.data,
+          coverFile,
+        });
+        await recordComicAudit("comic.create", {
+          comicId: created.id,
+          status: created.status,
+          title: created.title,
+          target_user_id: created.storyId,
+        });
+        applySavedRecord(created);
+        clearComicDraft("new");
+        autoSave.clear();
+        toast.success("Comic created");
+      }
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Failed to save comic.");
+    } finally {
+      setFormBusy(false);
+    }
+  }, [applySavedRecord, autoSave, canManageAll, coverFile, formValues, selectedComic]);
+
+  const handleSaveDraft = useCallback(async () => {
+    setFormError(null);
+
+    const parsed = ComicCmsFormSchema.safeParse(formValues);
+    if (!parsed.success) {
+      setFormError(parsed.error.issues[0]?.message ?? "Fix the comic metadata before saving a draft.");
+      return;
+    }
+
+    saveComicDraft(draftKey, parsed.data);
+
+    if (selectedComic) {
+      try {
+        let nextCoverUrl = selectedComic.coverUrl;
+        if (coverFile) {
+          nextCoverUrl = await uploadComicCover(coverFile);
+        }
+
+        const updated: ComicCmsRecord = {
+          ...selectedComic,
+          ...parsed.data,
+          coverUrl: nextCoverUrl,
+          status: parsed.data.status,
+          lastUpdatedAt: new Date().toISOString(),
+        };
+
+        const saved = await updateComicRecord(updated);
+        await recordComicAudit("comic.draft.save", {
+          comicId: saved.id,
+          status: saved.status,
+          title: saved.title,
+          target_user_id: selectedComic.storyId,
+        });
+        applySavedRecord(saved);
+        autoSave.clear();
+        toast.success("Draft saved to catalog and local recovery storage");
+      } catch (error) {
+        setFormError(error instanceof Error ? error.message : "Failed to save draft.");
+      }
+      return;
+    }
+
+    await recordComicAudit("comic.draft.save", {
+      comicId: draftKey,
+      status: parsed.data.status,
+      title: parsed.data.title,
+      target_user_id: null,
+    });
+    toast.success("Draft saved locally");
+  }, [applySavedRecord, autoSave, coverFile, draftKey, formValues, selectedComic]);
+
+  const handlePublish = useCallback(async () => {
+    if (!canManageAll) return;
+    setFormError(null);
+
+    const parsed = ComicCmsFormSchema.safeParse({ ...formValues, status: "published" });
+    if (!parsed.success) {
+      setFormError(parsed.error.issues[0]?.message ?? "Fix the comic metadata before publishing.");
+      return;
+    }
+
+    setFormBusy(true);
+    try {
+      const nextState = { ...parsed.data, status: "published" as const };
+      if (selectedComic) {
+        let nextCoverUrl = selectedComic.coverUrl;
+        if (coverFile) {
+          nextCoverUrl = await uploadComicCover(coverFile);
+        }
+
+        const updated: ComicCmsRecord = {
+          ...selectedComic,
+          ...nextState,
+          coverUrl: nextCoverUrl,
+          status: "published",
+          lastUpdatedAt: new Date().toISOString(),
+        };
+
+        const saved = await updateComicRecord(updated);
+        await recordComicAudit("comic.publish", {
+          comicId: saved.id,
+          status: saved.status,
+          title: saved.title,
+          target_user_id: selectedComic.storyId,
+        });
+        applySavedRecord(saved);
+        clearComicDraft(selectedComic.id);
+        autoSave.clear();
+      } else {
+        const created = await createComicFromMetadata({
+          ...nextState,
+          coverFile,
+        });
+        await recordComicAudit("comic.publish", {
+          comicId: created.id,
+          status: "published",
+          title: created.title,
+          target_user_id: created.storyId,
+        });
+        applySavedRecord(created);
+        clearComicDraft("new");
+        autoSave.clear();
       }
 
-      const comic = await createComic({
-        title: createTitle.trim(),
-        description: createDescription.trim(),
-        coverUrl,
-        author: createAuthor.trim(),
-        status: createStatus,
-        category,
-      });
-
-      saveComicContext(comic);
-      setComicLibrary((prev) => [comic, ...prev.filter((item) => item.id !== comic.id)]);
-      setSelectedComicId(comic.id);
-
-      setCreateTitle("");
-      setCreateDescription("");
-      setCreateAuthor("");
-      setCreateStatus("ongoing");
-      setCreateCategoryInput("");
-      setCreateCover(null);
-
-      setActiveSubTab("add_chapter");
+      toast.success("Comic published");
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Failed to create comic.");
+      setFormError(error instanceof Error ? error.message : "Failed to publish comic.");
     } finally {
-      setCreateLoading(false);
+      setFormBusy(false);
     }
-  };
+  }, [applySavedRecord, autoSave, canManageAll, coverFile, formValues, selectedComic]);
 
-  const handleAddChapter = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setChapterError(null);
+  const handleDelete = useCallback(async () => {
+    if (!selectedComic || !canManageAll) return;
+    setFormBusy(true);
+    try {
+      await deleteComic(selectedComic);
+      await recordComicAudit("comic.delete", {
+        comicId: selectedComic.id,
+        status: selectedComic.status,
+        title: selectedComic.title,
+        target_user_id: selectedComic.storyId,
+      });
+      clearComicDraft(selectedComic.id);
+      autoSave.clear();
+      setSelectedComicId(null);
+      setFormValues(DEFAULT_FORM);
+      setCatalog((prev) => prev.filter((item) => item.id !== selectedComic.id));
+      toast.success("Comic deleted");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Failed to delete comic.");
+    } finally {
+      setFormBusy(false);
+    }
+  }, [autoSave, canManageAll, selectedComic]);
 
+  const handleChapterFiles = useCallback((incomingFiles: File[]) => {
+    addChapterFiles(incomingFiles);
+  }, [addChapterFiles]);
+
+  const handleChapterSave = useCallback(async () => {
     if (!selectedComic) {
-      setChapterError("Select a comic before adding a chapter.");
+      setChapterError("Choose a comic before uploading pages.");
       return;
     }
 
-    if (!chapterTitle.trim()) {
-      setChapterError("Chapter title is required.");
+    const parsed = ComicChapterFormSchema.safeParse(chapterValues);
+    if (!parsed.success) {
+      setChapterError(parsed.error.issues[0]?.message ?? "Fix the chapter metadata before uploading.");
       return;
     }
 
-    if (chapterImages.length === 0) {
-      setChapterError("At least one chapter image is required.");
+    if (chapterPages.length === 0) {
+      setChapterError("Add at least one page.");
       return;
     }
 
-    if (!orderConfirmed) {
-      setChapterError("Please confirm the final page order before saving.");
+    const oversize = chapterPages.find((page) => page.sizeBytes > MAX_PAGE_SIZE_BYTES);
+    if (oversize) {
+      setChapterError(`Page ${oversize.fileName} exceeds the 2 MB limit.`);
       return;
     }
 
-    setChapterLoading(true);
+    setChapterBusy(true);
+    try {
+      const ordered = [...chapterPages].sort((left, right) => left.order - right.order);
+      const chapter = await createComicChapterFromFiles(selectedComic, parsed.data, ordered.map((page) => page.file));
+      await recordComicAudit("comic.chapter.create", {
+        comicId: selectedComic.id,
+        chapterId: chapter.id,
+        chapterNumber: parsed.data.chapterNumber,
+        title: parsed.data.title,
+        target_user_id: selectedComic.storyId,
+      });
+      clearComicDraft(selectedComic.id);
+      autoSave.clear();
+      setCatalog((prev) =>
+        prev.map((item) =>
+          item.id === selectedComic.id
+            ? {
+                ...item,
+                chapters: [...item.chapters, chapter],
+                lastUpdatedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      );
+      setChapterValues(DEFAULT_CHAPTER_FORM);
+      resetChapterPages();
+      toast.success("Chapter uploaded and optimized");
+    } catch (error) {
+      setChapterError(error instanceof Error ? error.message : "Failed to save chapter.");
+    } finally {
+      setChapterBusy(false);
+    }
+  }, [autoSave, chapterPages, chapterValues, resetChapterPages, selectedComic]);
+
+  const handlePurgeChapter = useCallback(async (chapter: ComicCmsChapterRecord) => {
+    if (!selectedComic) return;
 
     try {
-      const ordered = [...chapterImages].sort((a, b) => a.order - b.order);
-      const imageUrls = await uploadChapterImages(ordered.map((entry) => entry.file));
-
-      await createComicChapter({
+      await requestComicCachePurge({
         comicId: selectedComic.id,
-        tenantKey: selectedComic.tenantKey,
-        storyId: selectedComic.storyId,
-        chapterNumber,
-        title: chapterTitle.trim(),
-        content: imageUrls,
+        chapterId: chapter.id,
+        assetKeys: chapter.pages.map((page) => page.assetUrl).filter(Boolean),
+      });
+      await recordComicAudit("comic.cache.purge", {
+        comicId: selectedComic.id,
+        chapterId: chapter.id,
+        chapterNumber: chapter.chapterNumber,
+        target_user_id: selectedComic.storyId,
+      });
+      toast.success(`Cache purge queued for chapter ${chapter.chapterNumber}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to queue cache purge");
+    }
+  }, [selectedComic]);
+
+  const handleComicPurge = useCallback(async () => {
+    if (!selectedComic) return;
+
+    try {
+      await requestComicCachePurge({
+        comicId: selectedComic.id,
+        assetKeys: [selectedComic.coverUrl].filter(Boolean),
+      });
+      await recordComicAudit("comic.cache.purge", {
+        comicId: selectedComic.id,
+        target_user_id: selectedComic.storyId,
+        title: selectedComic.title,
+      });
+      toast.success(`Cache purge queued for ${selectedComic.title}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to queue cache purge");
+    }
+  }, [selectedComic]);
+
+  const handleModerationAction = useCallback(async (commentId: string, nextStatus: ComicReportedComment["status"]) => {
+    if (!canModerate) return;
+
+    setModerationBusy(true);
+    try {
+      const nextState = ComicModerationSchema.parse({
+        keywords: moderation.keywords,
+        reportedComments: moderation.reportedComments.map((comment) =>
+          comment.commentId === commentId ? { ...comment, status: nextStatus } : comment,
+        ),
       });
 
-      setChapterTitle("");
-      setChapterNumber(1);
-      setOrderConfirmed(false);
-      clearChapterImages();
-    } catch (error) {
-      setChapterError(error instanceof Error ? error.message : "Failed to create chapter.");
+      setModeration(nextState);
+      saveComicModerationState(nextState);
+
+      await recordComicAudit(`comic.comment.${nextStatus}`, {
+        comicId: selectedComic?.id ?? "moderation-queue",
+        commentId,
+        status: nextStatus,
+        target_user_id: selectedComic?.storyId ?? null,
+      });
     } finally {
-      setChapterLoading(false);
+      setModerationBusy(false);
     }
-  };
+  }, [canModerate, selectedComic]);
+
+  const handleKeywordSave = useCallback(async () => {
+    if (!canModerate) return;
+    const nextKeywords = uniqueTokens([...moderation.keywords, ...keywordInput.split(",").map((item) => item.trim())]);
+    const nextState = ComicModerationSchema.parse({
+      keywords: nextKeywords,
+      reportedComments: moderation.reportedComments,
+    });
+    setModeration(nextState);
+    setKeywordInput("");
+    saveComicModerationState(nextState);
+    await recordComicAudit("comic.moderation.keywords.update", {
+      comicId: selectedComic?.id ?? "moderation-queue",
+      keywords: nextState.keywords,
+      target_user_id: selectedComic?.storyId ?? null,
+    });
+    toast.success("Profanity filter saved");
+  }, [canModerate, keywordInput, moderation, selectedComic]);
+
+  const clearKeyword = useCallback(async (keyword: string) => {
+    if (!canModerate) return;
+    const nextState = ComicModerationSchema.parse({
+      keywords: moderation.keywords.filter((item) => item !== keyword),
+      reportedComments: moderation.reportedComments,
+    });
+    setModeration(nextState);
+    saveComicModerationState(nextState);
+    await recordComicAudit("comic.moderation.keywords.remove", {
+      comicId: selectedComic?.id ?? "moderation-queue",
+      keyword,
+      target_user_id: selectedComic?.storyId ?? null,
+    });
+  }, [canModerate, moderation, selectedComic]);
+
+  const selectedComicViews = selectedComic?.viewCount ?? 0;
+  const chapterCount = selectedComic?.chapters.length ?? 0;
 
   return (
-    <div className="space-y-6 max-w-6xl">
-      <header>
-        <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Comic Management</h1>
-        <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">
-          Build comics in D1 with full metadata and upload covers/pages to Cloudflare R2.
-        </p>
+    <div className="space-y-6 max-w-7xl">
+      <header className="rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 text-white p-6 shadow-2xl shadow-slate-950/20">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-3">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.35em] text-cyan-100">
+              <Layers3 size={12} /> Comic Management CMS
+            </div>
+            <div>
+              <h1 className="text-3xl md:text-4xl font-black tracking-tight">Comic Management Tab</h1>
+              <p className="mt-2 max-w-3xl text-sm md:text-base text-slate-300">
+                Manage comic metadata, chapters, assets, moderation, and audit trails from one RBAC-aware control surface.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricPill label="Comics" value={catalog.length} />
+            <MetricPill label="Drafts" value={catalog.filter((item) => item.status === "draft").length} />
+            <MetricPill label="Published" value={catalog.filter((item) => item.status === "published").length} />
+            <MetricPill label="Pages" value={totalPages} />
+          </div>
+        </div>
       </header>
 
-      <div className="flex gap-2 border-b border-slate-200 dark:border-slate-800">
-        <button
-          onClick={() => setActiveSubTab("create_comic")}
-          className={`px-6 py-4 font-bold text-sm border-b-2 transition-colors ${
-            activeSubTab === "create_comic"
-              ? "border-primary text-primary"
-              : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-          }`}
-        >
-          <Plus size={16} className="inline mr-2" />
-          Create Main Comic
-        </button>
-        <button
-          onClick={() => setActiveSubTab("add_chapter")}
-          className={`px-6 py-4 font-bold text-sm border-b-2 transition-colors ${
-            activeSubTab === "add_chapter"
-              ? "border-primary text-primary"
-              : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-          }`}
-        >
-          <Upload size={16} className="inline mr-2" />
-          Create Chapter
-        </button>
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+        {[
+          ["catalog", "Catalog"],
+          ["editor", "Edit / Create"],
+          ["chapters", "Chapters & Assets"],
+          ["moderation", "Comments & Reports"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key as TabKey)}
+            className={`rounded-full px-5 py-3 text-sm font-bold transition-all ${
+              activeTab === key
+                ? "bg-slate-900 text-white dark:bg-cyan-500 dark:text-slate-950"
+                : "bg-white text-slate-600 border border-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:border-slate-800"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {activeSubTab === "create_comic" && (
-        <div className="space-y-6">
-          {createError && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-700 px-6 py-4">
-              <p className="text-sm font-bold text-red-700 dark:text-red-300">{createError}</p>
+      {activeTab === "catalog" && (
+        <Panel
+          title="Comic Catalog"
+          subtitle="Search, filter, and open a comic for editing."
+          icon={<Search size={14} />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => refreshCatalog(true)}
+                disabled={refreshing}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
+              </button>
+              <button
+                type="button"
+                onClick={loadNewComicDraft}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950"
+              >
+                <Plus size={14} /> New draft
+              </button>
             </div>
-          )}
-          {createWarning && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-6 py-4">
-              <p className="text-sm font-bold text-amber-800 dark:text-amber-300">{createWarning}</p>
-            </div>
-          )}
-
-          <form
-            onSubmit={handleCreateComic}
-            className="space-y-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Title</span>
-                <input
-                  type="text"
-                  value={createTitle}
-                  onChange={(event) => setCreateTitle(event.target.value)}
-                  placeholder="Enter comic title"
-                  required
-                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Slug (Auto)</span>
-                <input
-                  type="text"
-                  value={generatedSlug}
-                  disabled
-                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-500 dark:text-slate-400"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Author</span>
-                <input
-                  type="text"
-                  value={createAuthor}
-                  onChange={(event) => setCreateAuthor(event.target.value)}
-                  placeholder="Author name"
-                  required
-                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Status</span>
-                <select
-                  value={createStatus}
-                  onChange={(event) => setCreateStatus(event.target.value === "completed" ? "completed" : "ongoing")}
-                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
-                >
-                  <option value="ongoing">ongoing</option>
-                  <option value="completed">completed</option>
-                </select>
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Description</span>
-              <textarea
-                value={createDescription}
-                onChange={(event) => setCreateDescription(event.target.value)}
-                placeholder="Enter comic description"
-                rows={4}
-                className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50 resize-vertical"
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">
-                Categories (comma separated)
-              </span>
+          }
+        >
+          <div className="grid gap-3 lg:grid-cols-4">
+            <label className="flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3">
+              <Search size={16} className="text-slate-400" />
               <input
-                type="text"
-                value={createCategoryInput}
-                onChange={(event) => setCreateCategoryInput(event.target.value)}
-                placeholder="action, adventure, fantasy"
-                className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                value={filters.search}
+                onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+                placeholder="Search comics"
+                className="w-full bg-transparent text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
               />
             </label>
 
-            <label className="block">
-              <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Cover Image</span>
-              <div className="mt-3 flex items-center gap-6">
+            <label className="flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3">
+              <Filter size={16} className="text-slate-400" />
+              <select
+                value={filters.status}
+                onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as ComicCatalogFilters["status"] }))}
+                className="w-full bg-transparent text-sm font-semibold text-slate-900 dark:text-white focus:outline-none"
+              >
+                <option value="all">All statuses</option>
+                <option value="draft">Draft</option>
+                <option value="pending">Pending</option>
+                <option value="published">Published</option>
+                <option value="archived">Archived</option>
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3">
+              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Genre</div>
+              <select
+                value={filters.genre}
+                onChange={(event) => setFilters((current) => ({ ...current, genre: event.target.value }))}
+                className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 dark:text-white focus:outline-none"
+              >
+                <option value="">All genres</option>
+                {genreOptions.map((genre) => (
+                  <option key={genre} value={genre}>
+                    {genre}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3">
+              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Author</div>
+              <select
+                value={filters.author}
+                onChange={(event) => setFilters((current) => ({ ...current, author: event.target.value }))}
+                className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 dark:text-white focus:outline-none"
+              >
+                <option value="">All authors</option>
+                {authorOptions.map((author) => (
+                  <option key={author} value={author}>
+                    {author}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-[1.3fr_0.9fr]">
+            <div className="space-y-3">
+              {sortedCatalog.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-10 text-center text-slate-500 dark:text-slate-400">
+                  No comics match the current filters.
+                </div>
+              ) : (
+                sortedCatalog.map((comic) => (
+                  <button
+                    key={comic.id}
+                    onClick={() => openComic(comic.id, "editor")}
+                    className={`w-full rounded-3xl border px-4 py-4 text-left transition-all ${
+                      selectedComic?.id === comic.id
+                        ? "border-cyan-400 bg-cyan-50 dark:bg-cyan-500/10"
+                        : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/60 hover:border-cyan-300 dark:hover:border-cyan-700"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div className="flex items-start gap-3">
+                        <img
+                          src={proxiedR2ImageUrl(comic.coverUrl) || "https://placehold.co/96x128/png?text=Comic"}
+                          alt={comic.title}
+                          className="h-20 w-16 rounded-2xl object-cover border border-slate-200 dark:border-slate-800"
+                        />
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-base font-black text-slate-900 dark:text-white">{comic.title}</h3>
+                            <StatusBadge status={comic.status} />
+                          </div>
+                          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{comic.author} · {comic.slug}</p>
+                          <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">{comic.description || "No description provided."}</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 dark:text-slate-400 md:text-right">
+                        <div>
+                          <div className="font-black text-slate-700 dark:text-slate-200">{comic.chapters.length}</div>
+                          chapters
+                        </div>
+                        <div>
+                          <div className="font-black text-slate-700 dark:text-slate-200">{comic.viewCount}</div>
+                          views
+                        </div>
+                        <div className="col-span-2">Updated {formatDateTime(comic.lastUpdatedAt)}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Selected</div>
+                  <div className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedComicLabel}</div>
+                </div>
+                <StatusBadge status={selectedComic?.status ?? "draft"} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-3">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Views</div>
+                  <div className="mt-1 text-lg font-black text-slate-900 dark:text-white">{selectedComicViews}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-3">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Chapters</div>
+                  <div className="mt-1 text-lg font-black text-slate-900 dark:text-white">{chapterCount}</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleComicPurge}
+                  disabled={!selectedComic}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 disabled:opacity-50"
+                >
+                  <Sparkles size={14} /> Purge cache
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectedComic && openComic(selectedComic.id, "editor")}
+                  disabled={!selectedComic}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950 disabled:opacity-50"
+                >
+                  <PencilLine size={14} /> Edit comic
+                </button>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {activeTab === "editor" && (
+        <Panel
+          title="Comic Editor"
+          subtitle="Create a new comic or edit an existing record."
+          icon={<BookOpen size={14} />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={loadNewComicDraft}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200"
+              >
+                <Plus size={14} /> New draft
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDraft}
+                disabled={formBusy}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 disabled:opacity-50"
+              >
+                <CheckCircle2 size={14} /> Save draft
+              </button>
+              <button
+                type="button"
+                onClick={handlePublish}
+                disabled={formBusy || !canManageAll}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950 disabled:opacity-50"
+              >
+                <Wand2 size={14} /> Publish
+              </button>
+            </div>
+          }
+        >
+          <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Title</div>
+                  <input
+                    value={formValues.title}
+                    onChange={(event) => setFormValues((current) => ({ ...current, title: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                    placeholder="Comic title"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Slug</div>
+                  <input
+                    value={slugify(formValues.title)}
+                    readOnly
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-600 dark:text-slate-300"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Author</div>
+                  <input
+                    value={formValues.author}
+                    onChange={(event) => setFormValues((current) => ({ ...current, author: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                    placeholder="Author name"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Artist</div>
+                  <input
+                    value={formValues.artist}
+                    onChange={(event) => setFormValues((current) => ({ ...current, artist: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                    placeholder="Artist name"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Translator</div>
+                  <input
+                    value={formValues.translator}
+                    onChange={(event) => setFormValues((current) => ({ ...current, translator: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                    placeholder="Translator"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Source</div>
+                  <input
+                    value={formValues.source}
+                    onChange={(event) => setFormValues((current) => ({ ...current, source: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                    placeholder="Official source or reference"
+                  />
+                </label>
+              </div>
+
+              <label className="space-y-2 block">
+                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Description</div>
+                <textarea
+                  value={formValues.description}
+                  onChange={(event) => setFormValues((current) => ({ ...current, description: event.target.value }))}
+                  rows={6}
+                  className="w-full rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                  placeholder="Synopsis and editorial notes"
+                />
+              </label>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Status</div>
+                  <select
+                    value={formValues.status}
+                    onChange={(event) => setFormValues((current) => ({ ...current, status: event.target.value as ComicStatus }))}
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="pending">Pending</option>
+                    <option value="published">Published</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </label>
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Scheduled at</div>
+                  <input
+                    value={formatDateTimeLocalInput(formValues.scheduledAt)}
+                    onChange={(event) =>
+                      setFormValues((current) => ({ ...current, scheduledAt: parseDateTimeLocalInput(event.target.value) }))
+                    }
+                    type="datetime-local"
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Rank score</div>
+                  <input
+                    value={formValues.rankScore}
+                    onChange={(event) => setFormValues((current) => ({ ...current, rankScore: Number(event.target.value || 0) }))}
+                    type="number"
+                    min={0}
+                    max={100}
+                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <ChipEditor
+                  label="Genres"
+                  helper="Comma separated"
+                  values={formValues.genres}
+                  onChange={(values) => setFormValues((current) => ({ ...current, genres: values }))}
+                  placeholder="Action, fantasy, romance"
+                  icon={<Tags size={12} />}
+                />
+                <ChipEditor
+                  label="Tags"
+                  helper="Comma separated"
+                  values={formValues.tags}
+                  onChange={(values) => setFormValues((current) => ({ ...current, tags: values }))}
+                  placeholder="Official, trending, editorial"
+                  icon={<Sparkles size={12} />}
+                />
+              </div>
+
+              {formError ? (
+                <div className="flex items-start gap-3 rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                  {formError}
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  disabled={formBusy}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-bold text-slate-700 dark:text-slate-200 disabled:opacity-50"
+                >
+                  <CheckCircle2 size={14} /> Save draft
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrimarySubmit}
+                  disabled={formBusy || (!selectedComic && !canManageAll)}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950 disabled:opacity-50"
+                >
+                  {selectedComic ? <PencilLine size={14} /> : <Plus size={14} />}
+                  {selectedComic ? "Save changes" : "Create comic"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePublish}
+                  disabled={formBusy || !canManageAll}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-bold text-cyan-800 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-200 disabled:opacity-50"
+                >
+                  <Wand2 size={14} /> Publish now
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={formBusy || !selectedComic || !canManageAll}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 disabled:opacity-50"
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 p-4 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Preview</div>
+                    <div className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedComicLabel}</div>
+                  </div>
+                  <StatusBadge status={formValues.status} />
+                </div>
+                <div className="overflow-hidden rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900">
+                  <img
+                    src={coverPreview || "https://placehold.co/640x960/png?text=Comic+Cover"}
+                    alt="Comic cover preview"
+                    className="aspect-[2/3] w-full object-cover"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-3">
+                    <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Slug</div>
+                    <div className="mt-1 break-all font-semibold text-slate-900 dark:text-white">{slugify(formValues.title)}</div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-3">
+                    <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Source</div>
+                    <div className="mt-1 break-all font-semibold text-slate-900 dark:text-white">{formValues.source || "-"}</div>
+                  </div>
+                </div>
+              </div>
+
+              <label className="block rounded-3xl border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-5 text-center cursor-pointer">
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(event) => setCreateCover(event.target.files?.[0] ?? null)}
-                  className="block text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/80"
+                  className="hidden"
+                  onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)}
                 />
-                {createCover && (
-                  <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-primary/20">
-                    <img src={URL.createObjectURL(createCover)} alt="Cover preview" className="w-full h-full object-cover" />
-                  </div>
-                )}
-              </div>
-            </label>
+                <Upload size={18} className="mx-auto text-slate-500" />
+                <div className="mt-3 text-sm font-bold text-slate-900 dark:text-white">Upload cover image</div>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">The file is sent through the Worker and proxied from R2.</p>
+              </label>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs font-semibold text-slate-500 dark:text-slate-400">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">id: UUID (auto)</div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">view_count: 0 (auto)</div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">created_at: auto</div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">updated_at: auto</div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={createLoading}
-              className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-primary/20 flex items-center justify-center gap-3 transition-all"
-            >
-              {createLoading ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  Creating Comic...
-                </>
-              ) : (
-                <>
-                  <Plus size={20} />
-                  Create Comic in D1
-                </>
+              {canManageAll ? null : (
+                <div className="flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+                  <ShieldAlert size={16} className="mt-0.5 shrink-0" />
+                  Read-only mode. Your role can view comic metadata but cannot create or publish records.
+                </div>
               )}
-            </button>
-          </form>
-        </div>
+            </div>
+          </div>
+        </Panel>
       )}
 
-      {activeSubTab === "add_chapter" && (
-        <div className="space-y-6">
-          {chapterError && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-700 px-6 py-4">
-              <p className="text-sm font-bold text-red-700 dark:text-red-300">{chapterError}</p>
+      {activeTab === "chapters" && (
+        <Panel
+          title="Chapters & Assets"
+          subtitle="Upload pages, sort them, and push optimized assets through the Worker pipeline."
+          icon={<FileImage size={14} />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => chapterInputRef.current?.click()}
+                disabled={!selectedComic || chapterBusy}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950 disabled:opacity-50"
+              >
+                <Upload size={14} /> Add pages
+              </button>
+              <button
+                type="button"
+                onClick={resetChapterPages}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200"
+              >
+                <Trash2 size={14} /> Clear queue
+              </button>
             </div>
-          )}
+          }
+        >
+          <input
+            ref={chapterInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(event) => handleChapterFiles(Array.from(event.target.files ?? []))}
+          />
 
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
-            <h2 className="text-lg font-black text-slate-900 dark:text-white">Select Main Comic</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Search</span>
-                <div className="relative mt-2">
-                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={comicSearch}
-                    onChange={(event) => setComicSearch(event.target.value)}
-                    placeholder="Search by title, slug, or author"
-                    className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 pl-10 pr-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              handleChapterFiles(Array.from(event.dataTransfer.files ?? []));
+            }}
+            className={`rounded-[2rem] border-2 border-dashed p-5 ${
+              selectedComic ? "border-cyan-300 bg-cyan-50/40 dark:bg-cyan-950/20" : "border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/50"
+            }`}
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400">
+                  <BookOpen size={14} /> Chapter builder
                 </div>
-              </label>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  Add a chapter title, pick page images, then reorder them before upload. Files over 2 MB are blocked.
+                </p>
+              </div>
+              <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">Selected comic: {selectedComicLabel}</div>
+            </div>
 
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Category Filter</span>
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <label className="space-y-2">
+                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Chapter number</div>
+                <input
+                  value={chapterValues.chapterNumber}
+                  onChange={(event) => setChapterValues((current) => ({ ...current, chapterNumber: Number(event.target.value || 1) }))}
+                  type="number"
+                  min={1}
+                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                />
+              </label>
+              <label className="space-y-2">
+                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Chapter title</div>
+                <input
+                  value={chapterValues.title}
+                  onChange={(event) => setChapterValues((current) => ({ ...current, title: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                  placeholder="Chapter title"
+                />
+              </label>
+              <label className="space-y-2">
+                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Status</div>
                 <select
-                  value={comicCategoryFilter}
-                  onChange={(event) => setComicCategoryFilter(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  value={chapterValues.status}
+                  onChange={(event) => setChapterValues((current) => ({ ...current, status: event.target.value as ComicStatus }))}
+                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
                 >
-                  <option value="all">All categories</option>
-                  {availableCategoryFilters.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
+                  <option value="draft">Draft</option>
+                  <option value="pending">Pending</option>
+                  <option value="published">Published</option>
+                  <option value="archived">Archived</option>
                 </select>
               </label>
+              <label className="space-y-2">
+                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Scheduled at</div>
+                <input
+                  value={formatDateTimeLocalInput(chapterValues.scheduledAt)}
+                  onChange={(event) =>
+                    setChapterValues((current) => ({ ...current, scheduledAt: parseDateTimeLocalInput(event.target.value) }))
+                  }
+                  type="datetime-local"
+                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
+                />
+              </label>
             </div>
 
-            <div className="max-h-56 overflow-y-auto rounded-2xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-200 dark:divide-slate-700">
-              {filteredComics.length === 0 && (
-                <div className="px-4 py-5 text-sm text-slate-500 dark:text-slate-400">
-                  No comics found. Create a comic in the first tab to start adding chapters.
+            {chapterError ? (
+              <div className="mt-4 flex items-start gap-3 rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                {chapterError}
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={handleChapterSave}
+                disabled={chapterBusy || !selectedComic}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950 disabled:opacity-50"
+              >
+                <Upload size={14} /> Upload chapter
+              </button>
+              <button
+                type="button"
+                onClick={() => handleChapterFiles([])}
+                disabled={chapterBusy}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-bold text-slate-700 dark:text-slate-200 disabled:opacity-50"
+              >
+                <RefreshCw size={14} /> Recalculate order
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {chapterPages.length === 0 ? (
+                <div className="sm:col-span-2 xl:col-span-3 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 p-10 text-center text-slate-500 dark:text-slate-400">
+                  Drop page images here or use the upload button above.
                 </div>
+              ) : (
+                chapterPages.map((page) => (
+                  <article
+                    key={page.id}
+                    draggable
+                    onDragStart={() => setPageDragId(page.id)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (pageDragId) {
+                        moveChapterPage(pageDragId, page.id);
+                        setPageDragId(null);
+                      }
+                    }}
+                    className="group rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-3 shadow-sm"
+                  >
+                    <img
+                      src={page.previewUrl}
+                      alt={page.fileName}
+                      className="aspect-[2/3] w-full rounded-2xl object-cover border border-slate-200 dark:border-slate-800"
+                    />
+                    <div className="mt-3 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.3em] text-slate-400">
+                          <GripVertical size={12} /> Page {page.order}
+                        </div>
+                        <p className="mt-1 break-all text-sm font-bold text-slate-900 dark:text-white">{page.fileName}</p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatBytes(page.sizeBytes)}</p>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveChapterPageByDirection(page.id, "up")}
+                          className="rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-2 text-slate-500 dark:text-slate-300"
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveChapterPageByDirection(page.id, "down")}
+                          className="rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-2 text-slate-500 dark:text-slate-300"
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeChapterPage(page.id)}
+                          className="rounded-full border border-rose-200 bg-rose-50 p-2 text-rose-600 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))
               )}
-              {filteredComics.map((comic) => (
-                <button
-                  key={comic.id}
-                  type="button"
-                  onClick={() => setSelectedComicId(comic.id)}
-                  className={`w-full text-left px-4 py-3 transition-colors ${
-                    selectedComicId === comic.id
-                      ? "bg-primary/10 border-l-4 border-primary"
-                      : "hover:bg-slate-50 dark:hover:bg-slate-800/60"
-                  }`}
-                >
-                  <p className="text-sm font-bold text-slate-900 dark:text-white">{comic.title}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">slug: {comic.slug} | author: {comic.author}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    category: {comic.category.length > 0 ? comic.category.join(", ") : "none"}
-                  </p>
-                </button>
-              ))}
             </div>
+          </div>
 
-            {selectedComic && (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-700 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-300">
-                Selected comic: <span className="font-black">{selectedComic.title}</span> (story_id: {selectedComic.storyId})
+          <div className="mt-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-black uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400">Existing chapters</div>
+              <div className="text-sm text-slate-500 dark:text-slate-400">{selectedChapters.length} chapter(s)</div>
+            </div>
+            {selectedChapters.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950/60 p-8 text-sm text-slate-500 dark:text-slate-400">
+                No uploaded chapters yet.
+              </div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {selectedChapters.map((chapter) => (
+                  <div key={chapter.id} className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Chapter {chapter.chapterNumber}</div>
+                        <div className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{chapter.title}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Updated {formatDateTime(chapter.updatedAt)}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <span className="rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">
+                          {chapter.pages.length} pages
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handlePurgeChapter(chapter)}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200"
+                        >
+                          <Sparkles size={12} /> Purge cache
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {chapter.pages.slice(0, 3).map((page) => (
+                        <img
+                          key={page.id}
+                          src={page.previewUrl}
+                          alt={page.fileName}
+                          className="h-24 w-full rounded-2xl object-cover border border-slate-200 dark:border-slate-800"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
+        </Panel>
+      )}
 
-          <form
-            onSubmit={handleAddChapter}
-            className="space-y-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Chapter Title</span>
-                <input
-                  type="text"
-                  value={chapterTitle}
-                  onChange={(event) => setChapterTitle(event.target.value)}
-                  placeholder="Enter chapter title"
-                  required
-                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </label>
+      {activeTab === "moderation" && (
+        <Panel
+          title="Comments & Reports"
+          subtitle="Manage profanity filters, report queues, and moderation actions."
+          icon={<ShieldAlert size={14} />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setModeration(listComicModerationState())}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200"
+              >
+                <RefreshCw size={14} /> Reload
+              </button>
+              <button
+                type="button"
+                onClick={handleKeywordSave}
+                disabled={!canModerate}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950 disabled:opacity-50"
+              >
+                <Sparkles size={14} /> Save filter
+              </button>
+            </div>
+          }
+        >
+          <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="space-y-4 rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 p-4">
+              <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400">
+                <Ban size={14} /> Profanity filter
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Keywords are stored locally for the demo admin workflow and audited whenever they change.
+              </p>
 
-              <label className="block">
-                <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Chapter Number</span>
+              <div className="flex flex-wrap gap-2">
+                {moderation.keywords.length === 0 ? (
+                  <div className="text-sm text-slate-400">No keywords defined.</div>
+                ) : (
+                  moderation.keywords.map((keyword) => (
+                    <button
+                      key={keyword}
+                      type="button"
+                      onClick={() => clearKeyword(keyword)}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-xs font-bold text-slate-700 dark:text-slate-200"
+                    >
+                      {keyword}
+                      <Trash2 size={12} className="text-slate-400" />
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <div className="flex gap-2">
                 <input
-                  type="number"
-                  min={1}
-                  value={chapterNumber}
-                  onChange={(event) => setChapterNumber(Math.max(1, parseInt(event.target.value || "1", 10)))}
-                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  value={keywordInput}
+                  onChange={(event) => setKeywordInput(event.target.value)}
+                  placeholder="Add keyword, comma separated"
+                  className="min-w-0 flex-1 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400"
                 />
-              </label>
+                <button
+                  type="button"
+                  onClick={handleKeywordSave}
+                  disabled={!canModerate}
+                  className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-cyan-500 dark:text-slate-950 disabled:opacity-50"
+                >
+                  Add
+                </button>
+              </div>
+
+              {canModerate ? null : (
+                <div className="flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+                  <ShieldAlert size={16} className="mt-0.5 shrink-0" />
+                  Your role can view moderation data but cannot modify it.
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">
-              <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">Bulk Image Upload (R2)</span>
-              <div
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setIsDropzoneActive(true);
-                }}
-                onDragLeave={() => setIsDropzoneActive(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setIsDropzoneActive(false);
-                  appendChapterImages(Array.from(event.dataTransfer.files ?? []).filter((file) => file.type.startsWith("image/")));
-                }}
-                className={`rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
-                  isDropzoneActive
-                    ? "border-primary bg-primary/5"
-                    : "border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                }`}
-              >
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Drag and drop images here</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">or choose files manually</p>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={(event) => appendChapterImages(Array.from(event.target.files ?? []))}
-                  className="mt-4 block mx-auto text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/80"
-                />
-              </div>
-            </div>
-
-            {chapterImages.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px]">
-                    Visual Order (Drag cards to reorder)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={clearChapterImages}
-                    className="text-xs font-bold text-red-600 dark:text-red-400"
-                  >
-                    Clear all
-                  </button>
+              {moderation.reportedComments.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950/60 p-8 text-sm text-slate-500 dark:text-slate-400">
+                  No reported comments in the queue.
                 </div>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Reorder pages by dragging cards, using Up/Down buttons, or focusing a card and pressing arrow keys.
-                </p>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {chapterImages.map((entry, index) => (
-                    <div
-                      key={entry.id}
-                      draggable
-                      onDragStart={() => setDragImageId(entry.id)}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={() => {
-                        if (dragImageId) {
-                          moveByDrag(dragImageId, entry.id);
-                        }
-                        setDragImageId(null);
-                        setOrderConfirmed(false);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-                          event.preventDefault();
-                          moveImageByDirection(entry.id, "up");
-                        }
-                        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-                          event.preventDefault();
-                          moveImageByDirection(entry.id, "down");
-                        }
-                      }}
-                      tabIndex={0}
-                      aria-label={`Page ${entry.order}. Use arrow keys to reorder.`}
-                      className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 overflow-hidden"
-                    >
-                      <div className="aspect-[3/4] overflow-hidden bg-slate-100 dark:bg-slate-900">
-                        <img src={entry.preview} alt={`Page ${entry.order}`} className="w-full h-full object-cover" />
+              ) : (
+                moderation.reportedComments.map((report) => (
+                  <article key={report.id} className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-4">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">
+                            {report.status}
+                          </span>
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">{report.reporter}</span>
+                        </div>
+                        <p className="text-sm text-slate-600 dark:text-slate-300">{report.comment}</p>
+                        <div className="text-xs text-slate-400">Reported {formatDateTime(report.createdAt)}</div>
                       </div>
-                      <div className="px-3 py-2 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <GripVertical size={14} className="text-slate-400" />
-                          <span className="text-xs font-black text-slate-700 dark:text-slate-300">Page {entry.order}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => moveImageByDirection(entry.id, "up")}
-                            disabled={index === 0}
-                            className="px-2 py-1 text-[11px] font-bold rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-100 disabled:opacity-40"
-                            aria-label={`Move page ${entry.order} up`}
-                          >
-                            Up
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => moveImageByDirection(entry.id, "down")}
-                            disabled={index === chapterImages.length - 1}
-                            className="px-2 py-1 text-[11px] font-bold rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-100 disabled:opacity-40"
-                            aria-label={`Move page ${entry.order} down`}
-                          >
-                            Down
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeChapterImage(entry.id)}
-                            className="ml-auto text-xs font-bold text-red-600 dark:text-red-400"
-                          >
-                            Remove
-                          </button>
-                        </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleModerationAction(report.commentId, "dismissed")}
+                          disabled={!canModerate || moderationBusy}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 disabled:opacity-50"
+                        >
+                          <CheckCircle2 size={12} /> Dismiss
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleModerationAction(report.commentId, "deleted")}
+                          disabled={!canModerate || moderationBusy}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 disabled:opacity-50"
+                        >
+                          <Trash2 size={12} /> Delete
+                        </button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={orderConfirmed}
-                onChange={(event) => setOrderConfirmed(event.target.checked)}
-                className="mt-1"
-              />
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                Final order check confirmed: I verified page sequence (Page 1 → Page {chapterImages.length || 1}) before saving to D1.
-              </span>
-            </label>
-
-            <button
-              type="submit"
-              disabled={chapterLoading || !selectedComic}
-              className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-primary/20 flex items-center justify-center gap-3 transition-all"
-            >
-              {chapterLoading ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  Saving Chapter...
-                </>
-              ) : (
-                <>
-                  <Upload size={20} />
-                  Save Chapter to D1
-                </>
+                  </article>
+                ))
               )}
-            </button>
-          </form>
-        </div>
+            </div>
+          </div>
+        </Panel>
       )}
     </div>
   );

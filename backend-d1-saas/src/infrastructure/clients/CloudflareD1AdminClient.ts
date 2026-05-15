@@ -55,6 +55,9 @@ export class CloudflareD1AdminClient implements ICloudflareClient {
 
     const payload = (await response.json()) as CloudflareApiResponse<T>;
     if (!response.ok || !payload.success || !payload.result) {
+      // Log Cloudflare response for easier debugging in dev
+      // eslint-disable-next-line no-console
+      console.error('CLOUDFLARE_API_ERROR_RESPONSE', { status: response.status, payload });
       const message = payload.errors?.[0]?.message ?? `${response.status} ${response.statusText}`;
       throw new DomainError(message, 'CLOUDFLARE_API_ERROR', 500);
     }
