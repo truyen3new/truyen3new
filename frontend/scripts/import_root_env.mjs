@@ -36,7 +36,10 @@ for (const l of lines) {
 }
 
 function isValidServiceRoleKey(value) {
-  return typeof value === 'string' && /^sb_service_role_/i.test(value.trim());
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  // Accept standard sb_service_role_ prefix or JWT format (three dot-separated base64 segments)
+  return /^sb_service_role_/i.test(trimmed) || /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(trimmed);
 }
 
 let existing = {};

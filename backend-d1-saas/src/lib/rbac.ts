@@ -1,6 +1,16 @@
-type RoleName = 'superadmin' | 'admin' | 'employee' | 'user';
+/**
+ * Role-Based Access Control (RBAC) - Enforced at Worker edge
+ * 
+ * Roles:
+ * - superadmin: Full access
+ * - admin: Content management + audit review
+ * - employee: Content creation only
+ * - user: Read-only access to published content
+ */
 
-type Permission =
+export type RoleName = 'superadmin' | 'admin' | 'employee' | 'user'
+
+export type Permission =
   | 'tables:crud:all'
   | 'roles:manage:admin'
   | 'r2:bucket:lifecycle'
@@ -24,7 +34,7 @@ type Permission =
   | 'comments:own:manage'
   | 'reading_history:own:manage'
   | 'audit_logs:read'
-  | 'stories:read';
+  | 'stories:read'
 
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
@@ -45,7 +55,7 @@ interface IdentityClaims {
 }
 
 interface IdentityContext {
-  userId: number;
+  userId: string;
   role: RoleName;
 }
 
@@ -156,21 +166,18 @@ function parseClaimsFromJwt(token: string): IdentityClaims | null {
   }
 }
 
-async function resolveRoleFromDatabase(env: RbacEnv, userId: number): Promise<RoleName | null> {
+async function resolveRoleFromDatabase(env: RbacEnv, userId: string): Promise<RoleName | null> {
   try {
     const row = await env.CONTROL_DB
       .prepare(
-        `SELECT r.name AS role
-         FROM users u
-         JOIN roles r ON r.id = u.role_id
-         WHERE u.id = ?1`
+        `SELECT role FROM users WHERE id = ?1`
       )
       .bind(userId)
       .first<{ role: string }>();
 
     return row ? normalizeRole(row.role) : null;
   } catch {
-    // If the role tables are not migrated yet, fallback to JWT claim role.
+    // If the users table is not available yet, fallback to JWT claim role.
     return null;
   }
 }
@@ -186,8 +193,8 @@ export async function resolveIdentity(request: Request, env: RbacEnv): Promise<I
     return null;
   }
 
-  const userId = Number(claims.sub);
-  if (!Number.isInteger(userId) || userId <= 0) {
+  const userId = claims.sub;
+  if (!userId) {
     return null;
   }
 
@@ -224,7 +231,7 @@ export function requirePermission(identity: IdentityContext | null, permission: 
   return null;
 }
 
-export function requireOwnership(identity: IdentityContext | null, ownerUserId: number): Response | null {
+export function requireOwnership(identity: IdentityContext | null, ownerUserId: string): Response | null {
   if (!identity) {
     return new Response('Unauthorized', { status: 401 });
   }
@@ -240,4 +247,4 @@ export function requireOwnership(identity: IdentityContext | null, ownerUserId: 
   return null;
 }
 
-export type { IdentityContext, Permission, RbacEnv, RoleName };
+export type { IdentityContext, RbacEnv };

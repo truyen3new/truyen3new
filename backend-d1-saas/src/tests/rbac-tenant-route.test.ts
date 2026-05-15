@@ -54,7 +54,7 @@ async function sha256Hex(value: string): Promise<string> {
 class MockD1Database implements D1Database {
   constructor(
     private readonly tenant: TenantRow,
-    private readonly userRoles: Record<number, string>,
+    private readonly userRoles: Record<string, string>,
   ) {}
 
   prepare(query: string): D1PreparedStatement {
@@ -75,9 +75,9 @@ class MockD1Database implements D1Database {
           return null;
         }
 
-        if (sql.includes("FROM users u") && sql.includes("JOIN roles r")) {
+        if (sql.includes("FROM users")) {
           const [userId] = bound;
-          const role = this.userRoles[Number(userId)];
+          const role = this.userRoles[String(userId)];
           if (!role) {
             return null;
           }
@@ -94,7 +94,7 @@ class MockD1Database implements D1Database {
   }
 }
 
-function createEnv(tenant: TenantRow, userRoles: Record<number, string>): Env {
+function createEnv(tenant: TenantRow, userRoles: Record<string, string>): Env {
   return {
     CONTROL_DB: new MockD1Database(tenant, userRoles),
     CF_ACCOUNT_ID: "test-account",
@@ -124,9 +124,9 @@ describe("RBAC on GET /tenants/:id", () => {
     };
   });
 
-  async function callGetTenantSummary(userId: number, role: string): Promise<Response> {
+  async function callGetTenantSummary(userId: string, role: string): Promise<Response> {
     const env = createEnv(tenant, { [userId]: role });
-    const token = createUnsignedJwt({ sub: String(userId), role });
+    const token = createUnsignedJwt({ sub: userId, role });
     const request = new Request(`http://localhost:8787/tenants/${tenantId}`, {
       method: "GET",
       headers: {
@@ -152,22 +152,27 @@ describe("RBAC on GET /tenants/:id", () => {
   });
 
   test("allows user role", async () => {
-    const response = await callGetTenantSummary(101, "user");
+    const response = await callGetTenantSummary("101", "user");
     expect(response.status).toBe(200);
   });
 
   test("allows employee role", async () => {
-    const response = await callGetTenantSummary(102, "employee");
+    const response = await callGetTenantSummary("102", "employee");
     expect(response.status).toBe(200);
   });
 
   test("allows admin role", async () => {
-    const response = await callGetTenantSummary(103, "admin");
+    const response = await callGetTenantSummary("103", "admin");
     expect(response.status).toBe(200);
   });
 
   test("allows superadmin role", async () => {
-    const response = await callGetTenantSummary(104, "superadmin");
+    const response = await callGetTenantSummary("104", "superadmin");
+    expect(response.status).toBe(200);
+  });
+
+  test("allows superadmin with UUID sub", async () => {
+    const response = await callGetTenantSummary("550e8400-e29b-41d4-a716-446655440000", "superadmin");
     expect(response.status).toBe(200);
   });
 });
