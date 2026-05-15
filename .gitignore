@@ -82,9 +82,7 @@ frontend/frontend/
 Instruction_create_key.md
 
 # Orphaned root configs / docs
-CONTRIBUTING.md
 skills-lock.json
-backend-d1-saas/README.md
 frontend/README.dev.md
 
 # Dead code / duplicate modules
