@@ -17,7 +17,7 @@
     {
       "binding": "CONTROL_DB",
       "database_name": "saas-control-plane",
-      "database_id": "<control-db-id>"
+      "database_id": "a531a426-efe9-4655-a1e0-85a54955d9f0"
     }
   ]
 }
