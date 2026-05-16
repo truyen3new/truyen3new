@@ -109,3 +109,21 @@ scripts/
 .github/copilot-instructions.md
 .opencode/opencode.json
 .opencode/plugins/graphify.js
+
+# Local dev logs and tool outputs
+**/.wrangler/
+workers/*/.wrangler/
+frontend/dev_*.txt
+*_err.txt
+*_out.txt
+dev_out.txt
+dev_err.txt
+response.txt
+test.txt
+*.tmp
+*.temp
+*.cache
+.clinerules/
+.cursor/
+.opencode/
+.windsurf/
