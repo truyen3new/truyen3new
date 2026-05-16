@@ -9,10 +9,20 @@
   ],
   "scripts": {
     "dev": "npm --prefix frontend run dev",
+    "dev:gateway": "npx wrangler dev --port 8787",
+    "dev:all": "concurrently -n fe,gw \"npm run dev\" \"npm run dev:gateway\"",
+    "dev:comics": "npx wrangler dev --port 9001",
+    "dev:stories": "npx wrangler dev --port 9002",
+    "dev:admin": "npx wrangler dev --port 9003",
+    "dev:analytics": "npx wrangler dev --port 9004",
     "build": "npm --prefix frontend run build",
     "check": "npm --prefix frontend run build && npm --prefix backend-d1-saas run check",
     "lint": "npm --prefix frontend run lint",
     "preview": "npm --prefix frontend run preview",
     "generate:types": "npm --prefix packages/api-types run generate"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "wrangler": "^4.92.0"
   }
 }

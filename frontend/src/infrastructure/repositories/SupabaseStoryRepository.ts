@@ -9,6 +9,7 @@ type StoryPageParams = {
   page: number;
   pageSize: number;
   keyword?: string;
+  category?: 'all' | string;
   status?: 'all' | StoryStatus;
   sort?: 'newest' | 'oldest' | 'most_viewed';
 };
@@ -65,6 +66,9 @@ export class SupabaseStoryRepository implements IStoryRepository {
       query = query.or(
         `title.ilike.%${escaped}%,author.ilike.%${escaped}%,category.ilike.%${escaped}%,description.ilike.%${escaped}%`,
       );
+    }
+    if (params.category && params.category !== 'all') {
+      query = query.ilike('category', `%${params.category}%`);
     }
     if (params.status && params.status !== 'all') {
       query = query.eq('status', params.status);

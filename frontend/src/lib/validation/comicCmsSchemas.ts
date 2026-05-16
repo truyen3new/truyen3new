@@ -27,7 +27,7 @@ export const ComicChapterFormSchema = z.object({
 });
 export type ComicChapterFormValues = z.infer<typeof ComicChapterFormSchema>;
 
-export const ComicReportedCommentStatus = z.enum(["open", "resolved", "dismissed"]);
+export const ComicReportedCommentStatus = z.enum(["open", "resolved", "dismissed", "deleted"]);
 
 export const ComicReportedComment = z.object({
   id: z.string(),

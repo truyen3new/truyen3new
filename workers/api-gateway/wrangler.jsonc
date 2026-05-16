@@ -9,8 +9,8 @@
     { "binding": "ANALYTICS_WORKER", "service": "analytics-worker" }
   ],
   "vars": {
-    "SUPABASE_URL": "https://<your-supabase-project>.supabase.co",
-    "SUPABASE_ANON_KEY": "<your-supabase-anon-key>",
-    "SUPABASE_JWKS_URL": "https://<your-supabase-project>.supabase.co/.well-known/jwks.json"
+    "SUPABASE_URL": "",
+    "SUPABASE_ANON_KEY": "",
+    "SUPABASE_JWKS_URL": ""
   }
 }

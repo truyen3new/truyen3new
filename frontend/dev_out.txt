@@ -17,3 +17,6 @@ Imported selected root env entries into frontend/.env.local.
 
  GET /admin 200 in 315ms (next.js: 124ms, application-code: 191ms)
  GET /admin 200 in 76ms (next.js: 5ms, application-code: 71ms)
+✓ Compiled in 542ms
+✓ Compiled in 363ms
+[?25h
