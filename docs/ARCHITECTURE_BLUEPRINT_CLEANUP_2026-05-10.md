@@ -1,10 +1,14 @@
 # Technical Architecture Blueprint: Project Cleanup & Reorganization
 **Version:** 1.0  
-**Status:** APPROVED FOR EXECUTION  
-**Date:** May 10, 2026  
+**Status:** SUPERSEDED  
+**Date:** May 10, 2026 (superseded by `plan_FEBE.md` on May 16, 2026)  
 **TechLead:** Architecture Design Document  
 **Scope:** Complete root-level reorganization following Clean Architecture standards  
-**Execution Note:** Repository-wide inventory scan was explicitly skipped by request; the execution plan below proceeds from confirmed cleanup items and existing repo memory only.
+
+> **⚠️ SUPERSEDED:** This plan has been superseded by `plan_FEBE.md` (FE/BE Decoupling & Migration Blueprint).  
+> The cleanup tasks outlined here were partially executed (git tag `cleanup-baseline-2026-05-10` created, `packages/api-types/` established).  
+> Remaining cleanup items (archiving, documentation consolidation) are now tracked in `plan_FEBE.md`.  
+> Keep this file for historical reference; do not use as an active execution plan.
 
 ---
 

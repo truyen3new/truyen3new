@@ -212,21 +212,19 @@ http://localhost:8787/?range=7d&role=admin
 2. In production, consider parallel fetching or caching at the edge
 3. Adjust cache TTL in `Cache-Control` header if needed
 
+## Migration to New Analytics Worker
+
+The original `analytics-aggregator` Worker (this doc) is being superseded by `workers/analytics-worker/` (part of the domain workers architecture). The new worker follows the same API contract but integrates with the API Gateway via service bindings.
+
+**Migration path:**
+1. Deploy `workers/analytics-worker/` with `npx wrangler deploy`
+2. Update API Gateway service bindings to include `ANALYTICS_WORKER`
+3. Verify dashboard metrics flow through the gateway at `/api/v1/analytics/dashboard`
+4. Decommission the old `analytics-aggregator` Worker
+
 ## Next Steps
 
-1. Deploy worker to production
-2. Set `CLOUDFLARE_ANALYTICS_WORKER_URL` env in frontend
+1. Deploy `workers/analytics-worker/` to production
+2. Set `CLOUDFLARE_ANALYTICS_WORKER_URL` env in frontend (if still using legacy worker)
 3. Dashboard will automatically use the worker for infrastructure metrics
 4. Monitor worker logs for errors in Cloudflare dashboard
-
-## Sprint 1 Completion Checklist
-
-- [x] Create RPC functions for user engagement metrics
-- [x] Create RPC functions for content performance metrics  
-- [x] Implement React Query hook for dashboard data
-- [x] Create Cloudflare Worker aggregator for infrastructure metrics
-- [x] Wire analytics service to fetch from Worker
-- [x] Fix frontend build issues
-
-**Sprint 1 Status**: ✅ Complete
-**Ready for**: Sprint 2 (Frontend Dashboard UI Components)

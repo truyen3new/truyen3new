@@ -1,55 +1,77 @@
-# Cloudflare R2 Deployment Guide (images, protected assets, Workers)
+# Cloudflare R2 Deployment Guide
 
-This guide explains recommended steps to deploy comic assets to Cloudflare R2 and securely serve them via Workers.
+Comprehensive guide for deploying and managing R2 comic assets with the Worker-based access control.
 
-## Create R2 bucket
+## Architecture
 
-- In the Cloudflare dashboard, go to R2 → Create bucket. Use a descriptive name like `lightstory-assets`.
-
-## Upload strategy
-
-- Upload raw story images and derived sizes (webp, small/medium/large). Use a deterministic object key: `stories/{story_id}/{chapter}/{image_name}@{width}.webp`.
-- Keep originals in a separate `originals/` prefix for re-derivation.
-
-## Worker for signed URLs (protect VIP images)
-
-- Deploy a Cloudflare Worker that validates a short-lived token (JWT signed by your backend) and returns a signed URL or proxies the object.
-- Signed-URL pattern: Worker checks `Authorization` header (Bearer JWT), validates the `role` claim, and fetches from R2 using the R2 binding.
-
-Example Worker pseudocode:
-
-```js
-addEventListener('fetch', event => {
-  const req = event.request;
-  // 1) validate JWT
-  // 2) check role/premium claims
-  // 3) return fetch(`https://<account>.r2.cloudflarestorage.com/${bucket}/${key}`)
-});
+```
+Client → R2 Proxy Worker (lightstory-r2-proxy) → R2 Bucket (lightstory-assets)
+              │
+              ├─ Public assets:  no auth, cache-control: public, max-age=86400
+              ├─ VIP assets:     JWT Bearer or HMAC signed URL required
+              └─ Signed URL:     `?sig=<hmac>.<expiry>` bypasses Bearer check
 ```
 
-## Caching and CDN
+The Worker is implemented in `workers/r2-signed-url/worker.js` using the module syntax (`export default { fetch }`).
 
-- Set `Cache-Control` headers via Worker when proxying to ensure Cloudflare caches at edge.
-- Use long TTLs for public assets; use short TTLs for VIP assets and rely on signed URLs.
+## Create R2 Bucket
 
-## Cost & egress minimization
+```bash
+# Via wrangler
+npx wrangler r2 bucket create lightstory-assets
 
-- Serve through Cloudflare's CDN (Workers + cache) to reduce repeated origin fetches.
-- Use image optimization (Cloudflare Images or transform in Workers) to reduce payload size.
+# Or via Cloudflare Dashboard → R2 → Create bucket
+```
+
+## Upload Strategy
+
+Use deterministic object keys:
+
+```
+assets/
+  public/
+    {story_id}/{chapter_id}/{image_name}@{width}.webp
+  vip/
+    {story_id}/{chapter_id}/{image_name}@{width}.webp    # premium/admin only
+```
+
+- Upload raw images and derived WebP sizes. Keep originals in `originals/` for re-derivation.
+- Upload via the admin API: `POST /api/internal/admin/upload-to-r2` with `x-r2-bucket` header.
+
+## Worker Configuration
+
+The Worker handles two auth mechanisms:
+
+1. **JWT Bearer** (`Authorization: Bearer <jwt>`): Validates Supabase JWT, checks `role` claim for VIP gating.
+2. **HMAC Signed URL** (`?sig=<hmac>.<expiry>`): Verifies HMAC-SHA256 signature for pre-signed time-limited access.
+
+See `docs/DEPLOY_R2_WORKER.md` for deployment steps and `workers/r2-signed-url/README_HMAC.md` for the HMAC pattern.
+
+## Caching Strategy
+
+| Asset Type | Cache-Control | CDN Behavior |
+|---|---|---|
+| Public (non-`vip/`) | `public, max-age=86400` | Edge-cached for 24h |
+| VIP (`vip/` prefix) | `private, max-age=60` | Browser-only cache, 60s |
+
+## Cost Minimization
+
+- All assets served through Cloudflare Workers + CDN — no direct R2 public access.
+- Cache hit ratio target: > 70% for public assets.
+- Use Cloudflare Images or Worker-side image transformation to reduce payload size.
 
 ## Security
 
-- Keep R2 credentials and account keys in a secure secrets store (Workers secrets or your backend). Do not expose keys to client-side code.
-- Use short-lived JWTs from your backend to gate access to VIP assets.
+- R2 credentials are never exposed client-side. Only the Worker has R2 bindings.
+- VIP assets require valid JWT (verified against Supabase JWKS) or HMAC signature.
+- HMAC secret (`ASSETS_SIGN_SECRET`) stored via `wrangler secret put`.
+- Short-lived signed URLs (60s expiry) for VIP asset sharing.
 
 ## Deployment
 
-- Use `wrangler` or the Cloudflare dashboard to deploy Workers and bind R2 buckets.
-- Example `wrangler.toml` snippet:
-
-```toml
-[bindings]
-type = "r2_bucket"
-name = "ASSETS_BUCKET"
-bucket_name = "lightstory-assets"
+```bash
+cd workers/r2-signed-url
+npx wrangler deploy
 ```
+
+See `docs/DEPLOY_R2_WORKER.md` for full deployment steps.

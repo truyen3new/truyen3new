@@ -1,44 +1,97 @@
 # Deploying the R2 Proxy Worker
 
-This document shows how to deploy the `lightstory-r2-proxy` Cloudflare Worker that proxies R2 assets and enforces simple JWT-based access control.
-
+Deploy the `lightstory-r2-proxy` Cloudflare Worker that proxies R2 assets with JWT + HMAC access control.
 
 ## Prerequisites
 
-- `wrangler` CLI installed and logged in with a token that has `workers` and `r2` permissions.
-- `CF_ACCOUNT_ID` and `WRANGLER_API_TOKEN` (or `wrangler login` interactive flow).
-- R2 bucket created (e.g., `lightstory-assets`).
+- Wrangler CLI installed and logged in (`npx wrangler login`)
+- R2 bucket created (e.g., `lightstory-assets`) in Cloudflare Dashboard
+- `ASSETS_SIGN_SECRET` generated: `openssl rand -hex 32`
 
 ## Steps
 
-### 1. Edit `workers/r2-signed-url/wrangler.toml`
+### 1. Configure `workers/r2-signed-url/wrangler.toml`
 
-- Replace `bucket_name = "lightstory-assets"` with your actual bucket name.
-- If you use KV, set the `namespace_id` accordingly.
+```toml
+name = "lightstory-r2-proxy"
+main = "worker.js"
+compatibility_date = "2026-05-16"
 
-### 2 — Set environment variables for the deploy session
+[r2_buckets]
+binding = "ASSETS_BUCKET"
+bucket_name = "lightstory-assets"   # Replace with your bucket name
 
-```bash
-export CF_ACCOUNT_ID=your_account_id
-export WRANGLER_API_TOKEN=your_token
+[[kv_namespaces]]
+binding = "KV"                       # Optional: for token cache
+# namespace_id = "<your-ns-id>"
 ```
 
-### 3 — Publish the Worker
+### 2. Set secrets
 
 ```bash
 cd workers/r2-signed-url
-wrangler publish
+
+# HMAC secret for signed URLs (required)
+npx wrangler secret put ASSETS_SIGN_SECRET
+# Paste the hex string from openssl rand -hex 32
+
+# JWKS URL (if using JWT instead of signed URLs)
+npx wrangler secret put SUPABASE_JWKS_URL
+# Value: https://<project>.supabase.co/.well-known/jwks.json
 ```
 
-### 4 — Configure DNS / route (optional)
+### 3. Deploy
 
-- Use `wrangler publish` `--routes` or set routes in the `wrangler.toml`.
+```bash
+cd workers/r2-signed-url
+npx wrangler deploy
 
-## Security notes
+# For staging
+npx wrangler deploy --env staging
+```
 
-- The Worker file contains only a placeholder JWT check (`parseJwt`) that does not verify signatures. Replace `parseJwt` with proper verification using JWKS or a shared secret before using in production.
-- Keep `WRANGLER_API_TOKEN` and any secrets out of source. Use `wrangler secret put` to store runtime secrets.
+### 4. Verify
 
-## Runtime bindings
+```bash
+# Public asset (no auth required)
+curl -I https://lightstory-r2-proxy.<account>.workers.dev/public/test.txt
+# Expected: 200, cache-control: public, max-age=86400
 
-- The `wrangler.toml` expects an R2 binding named `ASSETS_BUCKET`. After publishing, the binding will be available in the Worker as `ASSETS_BUCKET`.
+# VIP asset (no auth → 403)
+curl -I https://lightstory-r2-proxy.<account>.workers.dev/vip/premium.txt
+# Expected: 403
+
+# VIP asset with valid JWT
+curl -I -H "Authorization: Bearer <premium-jwt>" \
+  https://lightstory-r2-proxy.<account>.workers.dev/vip/premium.txt
+# Expected: 200, cache-control: private, max-age=60
+```
+
+## Security Notes
+
+- The Worker uses proper JWT verification via `jose` library and Supabase JWKS endpoint (not `parseJwt` placeholder).
+- HMAC signed URLs use `HMAC-SHA256` over `${key}:${expiry}`, verified with `SubtleCrypto`.
+- Use short expiry (60s) for VIP assets; longer TTL for public.
+- Keep `ASSETS_SIGN_SECRET` in `wrangler secret` — never in source code.
+
+## Runtime Bindings
+
+| Binding | Type | Description |
+|---|---|---|
+| `ASSETS_BUCKET` | R2 bucket | The R2 bucket for comic assets |
+| `KV` (optional) | KV namespace | Token cache for JWT revocation |
+
+## HMAC Signed URL Pattern
+
+Generate signed URLs server-side:
+
+```js
+import crypto from 'crypto';
+function signR2Key(key, expiryMs, secret) {
+  const payload = `${key}:${expiryMs}`;
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  return `${sig}.${expiryMs}`;
+}
+```
+
+See `workers/r2-signed-url/README_HMAC.md` for full details.

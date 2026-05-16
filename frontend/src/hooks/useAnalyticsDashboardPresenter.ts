@@ -1,6 +1,7 @@
 "use client";
 import { useQuery } from '@tanstack/react-query';
 import type { AnalyticsDashboardResponse, AnalyticsTimeRange } from '@/types/analytics';
+import { apiClient } from '@/lib/apiClient';
 
 /**
  * Hook: Fetch analytics dashboard data with React Query
@@ -19,25 +20,7 @@ export function useAnalyticsDashboardPresenter(
     refetchInterval: pollInterval > 0 ? pollInterval : false,
     refetchIntervalInBackground: false,
     queryFn: async (): Promise<AnalyticsDashboardResponse> => {
-      const url = new URL('/api/internal/admin/analytics/dashboard', window.location.origin);
-      url.searchParams.set('range', timeRange);
-
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-        },
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        const error = new Error(`Analytics fetch failed: ${response.statusText}`);
-        (error as any).status = response.status;
-        throw error;
-      }
-
-      const data = (await response.json()) as AnalyticsDashboardResponse;
-      return data;
+      return apiClient.get<AnalyticsDashboardResponse>(`/api/admin/analytics/dashboard?range=${encodeURIComponent(timeRange)}`);
     },
   });
 

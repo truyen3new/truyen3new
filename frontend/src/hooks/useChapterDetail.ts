@@ -1,17 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { apiClient } from '@/lib/apiClient';
 
 export const useChapterDetail = (chapterId: string) => {
   return useQuery({
     queryKey: ["chapter", chapterId],
     queryFn: async () => {
       if (!chapterId) return null;
-
-      const response = await fetch(`/api/chapters?id=${chapterId}`);
-      const json = await response.json();
-
-      if (json.error) throw new Error(json.error);
-
-      return json.data;
+      return apiClient.get(`/api/chapters?id=${chapterId}`);
     },
     enabled: !!chapterId,
     staleTime: 1000 * 60 * 60,

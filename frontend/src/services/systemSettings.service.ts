@@ -7,6 +7,7 @@ import {
   SITE_SETTING_KEYS,
 } from '@/lib/systemSettings';
 import { SiteSettingDto, SystemSettingsSnapshotDto } from '@/types/dto';
+import { apiClient } from '@/lib/apiClient';
 
 const SETTINGS_KEYS = [
   SITE_SETTING_KEYS.uiCompactMode,
@@ -33,17 +34,8 @@ const toRows = (input: unknown): SiteSettingDto[] => {
 export async function fetchSystemSettingsSnapshot(): Promise<SystemSettingsSnapshotDto> {
   try {
     const keysParam = SETTINGS_KEYS.join(',');
-    const res = await fetch(`/api/system-settings?keys=${encodeURIComponent(keysParam)}`);
-    if (!res.ok) {
-      return {
-        compactMode: false,
-        showSyncBadge: true,
-        dashboardTabVisibility: DEFAULT_DASHBOARD_TAB_VISIBILITY,
-        sidebarMenuVisibility: DEFAULT_SIDEBAR_MENU_VISIBILITY,
-      };
-    }
-    const json = await res.json();
-    const rows = toRows(json.data);
+    const data = await apiClient.get<{ data?: SiteSettingDto[] }>(`/api/admin/site-settings?keys=${encodeURIComponent(keysParam)}`).catch(() => null);
+    const rows = toRows(data?.data);
     const map = new Map(rows.map((item) => [item.key, item.value]));
 
     return {
@@ -76,14 +68,5 @@ export async function saveSystemSettingsSnapshot(snapshot: SystemSettingsSnapsho
     { key: SITE_SETTING_KEYS.sidebarMenuVisibility, value: snapshot.sidebarMenuVisibility },
   ];
 
-  const res = await fetch('/api/system-settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include', // Include cookies for session-based auth
-    body: JSON.stringify({ payload }),
-  });
-  if (!res.ok) {
-    const json = await res.json().catch(() => null);
-    throw new Error(json?.error ?? `Request failed ${res.status}`);
-  }
+  await apiClient.post('/api/admin/site-settings', { payload });
 }

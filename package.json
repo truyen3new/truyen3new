@@ -1,11 +1,18 @@
 {
   "name": "light-story-workspace",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "frontend",
+    "workers/*",
+    "backend-supabase"
+  ],
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "check": "npm --prefix frontend run build && npm --prefix backend-d1-saas run check",
     "lint": "npm --prefix frontend run lint",
-    "preview": "npm --prefix frontend run preview"
+    "preview": "npm --prefix frontend run preview",
+    "generate:types": "npm --prefix packages/api-types run generate"
   }
 }

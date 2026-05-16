@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createComic, saveComicContext, uploadComicCover } from "@/services/comic.service";
+import { createComic, uploadComicCover } from "@/services/comic.service";
 
 export default function CreateComic() {
   const router = useRouter();
@@ -19,9 +19,8 @@ export default function CreateComic() {
     try {
       const coverUrl = await uploadComicCover(cover);
       const comic = await createComic({ title, description, coverUrl });
-      saveComicContext(comic);
       alert(`Comic created: ${comic.title}`);
-      router.push(`/comics/${comic.id}/add-chapter`);
+      router.push(`/comics/${comic.id}/add-chapter?storyId=${comic.storyId}&tenantKey=${comic.tenantKey}`);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Failed to create comic");
     } finally {

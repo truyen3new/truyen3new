@@ -105,3 +105,6 @@ frontend/tests/
 
 # Operational scripts (no active references, no CI integration)
 scripts/
+.github/copilot-instructions.md
+.opencode/opencode.json
+.opencode/plugins/graphify.js

@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useOptimisticUpdate } from './useOptimisticUpdate';
+import { apiClient } from '@/lib/apiClient';
 
 /**
  * Hook for story-related mutations with optimistic updates.
@@ -16,8 +17,7 @@ export const useStoryMutations = () => {
   const useIncrementViewMutation = () => {
     return useMutation({
       mutationFn: async (storyId: string) => {
-        const res = await fetch('/api/rpc/increment-story-views', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storyId }) });
-        if (!res.ok) throw new Error('Request failed');
+        await apiClient.post('/api/rpc/increment-story-views', { storyId });
       },
       onMutate: async (storyId) => {
         // Cancel outgoing refetches
@@ -41,8 +41,7 @@ export const useStoryMutations = () => {
   const useLikeStoryMutation = () => {
     return useMutation({
       mutationFn: async ({ storyId, isCurrentlyLiked }: { storyId: string; isCurrentlyLiked: boolean }) => {
-        const res = await fetch(`/api/rpc/${isCurrentlyLiked ? 'unlike-story' : 'like-story'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storyId }) });
-        if (!res.ok) throw new Error('Request failed');
+        await apiClient.post(`/api/rpc/${isCurrentlyLiked ? 'unlike-story' : 'like-story'}`, { storyId });
       },
       onMutate: async ({ storyId, isCurrentlyLiked }) => {
         await queryClient.cancelQueries({ queryKey: ['story', storyId] });

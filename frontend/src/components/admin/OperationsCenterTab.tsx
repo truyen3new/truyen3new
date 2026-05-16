@@ -5,6 +5,7 @@ import { useAdConfigsQuery } from '@/app/_presenters/useAdManagerPresenter';
 import { SupabaseStoryRepository } from '@/infrastructure/repositories/SupabaseStoryRepository';
 import { Story } from '@/types/entities';
 import { ArrowRight, BookOpen, CircleAlert, Coins, FileText, Library, MessageSquare, Shield, Users, Workflow } from 'lucide-react';
+import { apiClient } from '@/lib/apiClient';
 
 const storyRepo = new SupabaseStoryRepository();
 
@@ -75,10 +76,8 @@ export const OperationsCenterTab: React.FC<OperationsCenterTabProps> = ({ onNavi
   const roleDistributionQuery = useQuery({
     queryKey: ['operations-center-role-distribution'],
     queryFn: async () => {
-      const res = await fetch('/api/role-distribution');
-      if (!res.ok) throw new Error('Failed to load role distribution');
-      const json = await res.json();
-      return json.data as Array<{ role: string; total: number }>;
+      const result = await apiClient.get<{ data: Array<{ role: string; total: number }> }>('/api/admin/role-distribution');
+      return result.data;
     },
   });
 

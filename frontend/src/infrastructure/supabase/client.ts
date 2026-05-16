@@ -1,16 +1,16 @@
-/**
- * Infrastructure Layer - Supabase Client
- * Reuses the shared browser client to avoid multiple GoTrueClient instances.
- */
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-import defaultSupabase, { supabase as sharedSupabase } from '@/lib/supabase/client';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-export const supabase = sharedSupabase;
+export const supabase: SupabaseClient | null = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey, {
+      auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true },
+    })
+  : null;
 
-export function createSupabaseClient() {
-  if (!supabase) {
-    throw new Error('Supabase environment variables not configured');
-  }
+export function createSupabaseClient(): SupabaseClient {
+  if (!supabase) throw new Error('Supabase environment variables not configured');
   return supabase;
 }
 
@@ -18,4 +18,4 @@ export function getSupabaseClient() {
   return supabase;
 }
 
-export default defaultSupabase;
+export default supabase;

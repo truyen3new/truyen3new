@@ -1,130 +1,131 @@
 # RLS & Authorization Testing Guide
 
 ## Overview
-This guide covers testing Row Level Security (RLS) policies and authorization logic for the Light Story comic platform across all user roles: anonymous, user, premium, admin, and superadmin.
 
-## Test Files
+Testing guide for Row Level Security (RLS) policies and authorization logic across all user roles: anonymous, user, premium, admin, and superadmin.
 
-### 1. SQL-Based Validation (`rls-validation.sql`)
-Quick validation of RLS helpers in Supabase editor.
+## 1. SQL-Based RLS Validation
 
-**Usage:**
-1. Open [Supabase Dashboard](https://app.supabase.com) → SQL Editor
-2. Copy and run `rls-validation.sql`
-3. Verify results in output
+Run these queries in Supabase Dashboard → SQL Editor to validate RLS helpers and policies.
 
-**What it tests:**
-- `is_superadmin()` helper returns correct values
-- `is_admin_or_higher()` helper works
-- `is_premium_or_higher()` helper works
-- VIP chapter policy includes superadmin access
+### Helper Function Tests
 
-### 2. Node.js Integration Tests (`rls-integration.test.js`)
-Comprehensive RLS tests across all roles using Supabase client.
+```sql
+-- is_superadmin() test
+SELECT public.is_superadmin('actual-user-uuid');  -- true for superadmin users
 
-**Prerequisites:**
-```bash
-# Install dependencies
-cd backend-supabase
-npm install @supabase/supabase-js
+-- is_admin_or_higher() test
+SELECT public.is_admin_or_higher('actual-user-uuid');  -- true for admin/superadmin
 
-# Set environment variables for test tokens
-export TEST_USER_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # user token
-export TEST_PREMIUM_TOKEN="..."  # premium token
-export TEST_ADMIN_TOKEN="..."  # admin token
-export TEST_SUPERADMIN_TOKEN="..."  # superadmin token
-export SUPABASE_URL="http://localhost:54321"  # or your production URL
-export SUPABASE_KEY="your_anon_key"
+-- is_premium_or_higher() test
+SELECT public.is_premium_or_higher('actual-user-uuid');  -- true for premium+
 ```
 
-**Usage:**
-```bash
-node supabase/tests/rls-integration.test.js
+### Policy Tests (anonymous/public)
+
+```sql
+-- Published stories should be readable
+SELECT * FROM public.stories WHERE status = 'published';
+-- Expected: rows returned
+
+-- Draft stories should be empty for anonymous
+SELECT * FROM public.stories WHERE status = 'draft';
+-- Expected: empty (unless you are staff)
+
+-- Free chapters readable
+SELECT * FROM public.chapters WHERE vip_content = false LIMIT 5;
+-- Expected: rows returned
+
+-- VIP chapters empty for anonymous
+SELECT * FROM public.chapters WHERE vip_content = true LIMIT 5;
+-- Expected: empty
 ```
 
-**What it tests:**
-- Anonymous: Can read free chapters only
-- User: Can read free chapters only
-- Premium: Can read free and VIP chapters
-- Admin: Can read free and VIP chapters, can update comments
-- Superadmin: Full access to all content and operations
-
-### 3. Server-Side Authorization Tests
-Test the updated `isAllowedRouteRole()` function in routeAuth.ts.
-
-**Location:** `frontend/src/lib/routeAuth.ts`
-
-**What changed:**
-- Added short-circuit check: if role === 'superadmin', return true (bypass allowedRoles check)
-- This ensures superadmin can access any endpoint regardless of allowedRoles config
-
-**Manual test:**
-```typescript
-import { isAllowedRouteRole } from '@/lib/routeAuth';
-
-// Superadmin should bypass all checks
-console.assert(isAllowedRouteRole('superadmin', ['admin']) === true);
-console.assert(isAllowedRouteRole('superadmin', []) === true);
-
-// Other roles should respect allowedRoles
-console.assert(isAllowedRouteRole('admin', ['admin', 'superadmin']) === true);
-console.assert(isAllowedRouteRole('admin', ['premium']) === false);
-```
-
-## Role Hierarchy
+## 2. Role Hierarchy & Permissions
 
 ```
 superadmin (highest)
   ├─ admin
-  │   └─ premium
-  │       └─ user
-  │           └─ anonymous (lowest)
+  │   ├─ employee
+  │   │   └─ premium
+  │   │       └─ user
+  │   │           └─ anonymous (lowest)
 ```
 
-### Permissions by Role
-
-| Role | Free Chapters | VIP Chapters | Comments (CRUD) | Settings | System Admin |
-|------|--------------|-------------|-----------------|----------|-------------|
+| Role | Free Chapters | VIP Chapters | Comments | Settings | Admin Panels |
+|---|---|---|---|---|---|
 | anonymous | ✅ | ❌ | ❌ | ❌ | ❌ |
 | user | ✅ | ❌ | ✅ (own) | ❌ | ❌ |
 | premium | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
+| employee | ✅ | ✅ | ✅ (own) | ❌ | Limited |
 | admin | ✅ | ✅ | ✅ (all) | ✅ | ✅ |
-| superadmin | ✅ | ✅ | ✅ (all) | ✅ | ✅ (full) |
+| superadmin | ✅ | ✅ | ✅ (all) | ✅ | ✅ (full bypass) |
 
-## Running Tests in CI/CD
+## 3. API Gateway Auth Tests
 
-Add to your GitHub Actions or deployment pipeline:
+Via the API Gateway (see `API_test.md` for full Postman test cases):
 
-```yaml
-- name: Validate RLS Policies
-  run: |
-    cd backend-supabase
-    export TEST_USER_TOKEN=${{ secrets.TEST_USER_TOKEN }}
-    export TEST_PREMIUM_TOKEN=${{ secrets.TEST_PREMIUM_TOKEN }}
-    export TEST_ADMIN_TOKEN=${{ secrets.TEST_ADMIN_TOKEN }}
-    export TEST_SUPERADMIN_TOKEN=${{ secrets.TEST_SUPERADMIN_TOKEN }}
-    node supabase/tests/rls-integration.test.js
+```bash
+# No auth → 401
+curl -s -o /dev/null -w "%{http_code}" https://gateway/api/v1/comics
+# → 401
+
+# Invalid JWT → 401
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer invalid" https://gateway/api/v1/comics
+# → 401
+
+# Valid JWT, insufficient role → 403
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer <user-jwt>" https://gateway/api/v1/comics
+# → 403
+
+# Valid JWT, correct role → 200
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer <admin-jwt>" https://gateway/api/v1/comics
+# → 200
 ```
 
-## Troubleshooting
+## 4. Server-Side Auth (routeAuth.ts)
 
-### "Token invalid or expired"
-- Refresh test tokens from Supabase auth
-- Ensure tokens have correct user roles in profiles table
+The `isAllowedRouteRole()` function in `frontend/src/lib/routeAuth.ts` handles role checks:
 
-### "RLS policy violates access"
-- Verify migrations have been applied: `202605110001_security_hardening_comments_ratings.sql` and `202605110002_add_superadmin_helpers.sql`
-- Check user roles in `profiles` table match test token user IDs
+- Superadmin: bypass all role checks (returns `true` unconditionally)
+- All other roles: checked against `allowedRoles` array
+- Supports Bearer JWT, cookie sessions, and `x-internal-secret`
 
-### "Helper functions not found"
-- Apply migration `202605110002_add_superadmin_helpers.sql`
-- Verify functions exist: `SELECT * FROM pg_proc WHERE proname LIKE 'is_%'`
+## 5. R2 Proxy Auth Tests
+
+```bash
+# Public asset → 200
+curl -I https://assets.worker.dev/public/test.txt
+
+# VIP asset no auth → 403
+curl -I https://assets.worker.dev/vip/premium.txt
+
+# VIP asset + premium JWT → 200
+curl -I -H "Authorization: Bearer <premium-jwt>" https://assets.worker.dev/vip/premium.txt
+
+# VIP asset + user JWT → 403
+curl -I -H "Authorization: Bearer <user-jwt>" https://assets.worker.dev/vip/premium.txt
+
+# Expired HMAC signed URL → 401
+curl -I "https://assets.worker.dev/vip/premium.txt?sig=hmac.0"
+```
+
+## 6. Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| RLS policy violation | Migration not applied | Run `supabase db push` |
+| Helper function not found | Missing migration | Apply `202605110002_add_superadmin_helpers.sql` |
+| Token invalid/expired | Auth session expired | Refresh Supabase JWT |
+| Gateway 401 on valid JWT | JWKS URL misconfigured | Check `SUPABASE_JWKS_URL` secret |
+| Superadmin can't access | routeAuth.ts short-circuit missing | Verify `isAllowedRouteRole('superadmin', [...])` returns true |
 
 ## Migration Checklist
 
-- [ ] Applied `202605110001_security_hardening_comments_ratings.sql`
-- [ ] Applied `202605110002_add_superadmin_helpers.sql`
-- [ ] Updated `frontend/src/lib/routeAuth.ts` with superadmin short-circuit
-- [ ] Tested RLS policies with `rls-validation.sql`
-- [ ] Tested with Node.js integration tests
-- [ ] Verified superadmin can access restricted endpoints
+- [ ] `20260421074259_admin_operations_schema.sql` (core admin tables + RLS)
+- [ ] `20260422025437_admin_user_audit_logs.sql` (audit logs RLS)
+- [ ] `202605100001_comic_platform.sql` (comic platform + VIP gating)
+- [ ] `202605110001_security_hardening_comments_ratings.sql` (comments/ratings RLS)
+- [ ] `202605110002_add_superadmin_helpers.sql` (superadmin fast-path)
+- [ ] Superadmin bypass in `frontend/src/lib/routeAuth.ts`
+- [ ] Gateway JWT validation configured with `SUPABASE_JWKS_URL`

@@ -1,0 +1,6 @@
+extends: ["spectral:oas", "spectral:asyncapi"]
+rules:
+  operation-tag-defined: error
+  operation-operationId: error
+  path-params: error
+  content-type-json: warn

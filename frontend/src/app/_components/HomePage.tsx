@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 
 import { fetchCategories } from "@/services/category.service";
-import { SupabaseStoryRepository } from "@/services/repositories/SupabaseStoryRepository";
-import { SupabaseChapterRepository } from "@/services/repositories/SupabaseChapterRepository";
+import { SupabaseStoryRepository } from '@/infrastructure/repositories/SupabaseStoryRepository';
+import { SupabaseChapterRepository } from '@/infrastructure/repositories/SupabaseChapterRepository';
 
 import { Story, Chapter, Category } from "@/types/entities";
 import { useAuth } from "@/modules/auth/AuthContext";

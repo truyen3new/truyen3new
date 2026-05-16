@@ -837,7 +837,7 @@ export const ComicManagementTab: React.FC = () => {
       await requestComicCachePurge({
         comicId: selectedComic.id,
         chapterId: chapter.id,
-        assetKeys: chapter.pages.map((page) => page.assetUrl).filter(Boolean),
+        assetKeys: chapter.pages.map((page) => page.assetUrl).filter((x): x is string => x != null),
       });
       await recordComicAudit("comic.cache.purge", {
         comicId: selectedComic.id,

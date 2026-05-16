@@ -6,6 +6,7 @@ import type {
   InfrastructureMetrics,
   UserEngagementMetrics,
 } from '@/types/analytics';
+import { apiClient } from '@/lib/apiClient';
 
 type WorkerInfrastructurePayload = Partial<InfrastructureMetrics> & {
   recorded_at?: string;
@@ -129,7 +130,6 @@ async function fetchWorkerAnalytics(range: AnalyticsTimeRange, role: AnalyticsRo
       signal: controller.signal,
       cache: 'no-store',
     });
-
     if (!response.ok) return null;
     return (await response.json()) as WorkerAnalyticsPayload;
   } catch {
@@ -141,7 +141,6 @@ async function fetchWorkerAnalytics(range: AnalyticsTimeRange, role: AnalyticsRo
 
 function normalizeInfrastructure(metrics: Partial<InfrastructureMetrics> | null | undefined): InfrastructureMetrics {
   if (!metrics) return { ...DEFAULT_INFRASTRUCTURE };
-
   const next: InfrastructureMetrics = {
     r2_usage_gb: round(toNumber(metrics.r2_usage_gb)),
     r2_allocated_gb: round(toNumber(metrics.r2_allocated_gb)),
@@ -158,11 +157,9 @@ function normalizeInfrastructure(metrics: Partial<InfrastructureMetrics> | null 
     device_tablet: Math.max(0, Math.trunc(toNumber((metrics as any).device_tablet))),
     top_zones: Array.isArray((metrics as any).top_zones) ? ((metrics as any).top_zones as any[]) : [],
   };
-
   if (next.storage_efficiency_pct === 0 && next.r2_allocated_gb > 0) {
     next.storage_efficiency_pct = computeEfficiency(next.r2_usage_gb, next.r2_allocated_gb);
   }
-
   return next;
 }
 
@@ -176,38 +173,11 @@ async function fetchReadOnlySupabaseMetrics(): Promise<{
   };
 }> {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    
-    if (!supabaseUrl || !supabaseKey) {
-      return {
-        userEngagement: createEmptyUserEngagement(),
-        contentPerformance: createEmptyContentPerformance(),
-        trendData: { user_growth: [], traffic: [], storage: [] },
-      };
-    }
-
-    const { createClient } = await import('@supabase/supabase-js');
-    const client = createClient(supabaseUrl, supabaseKey);
-
-    // Fetch user engagement metrics
-    const { data: engagementData } = await client
-      .rpc('get_user_engagement_summary', {
-        p_time_range: '7d',
-      });
-
-    // Fetch signup trends
-    const { data: signupTrendData } = await client
-      .rpc('get_signup_trend', {
-        p_days_back: 30,
-      });
-
-    // Fetch top chapters
-    const { data: topChaptersData } = await client
-      .rpc('get_top_chapters_by_reads', {
-        p_limit: 5,
-        p_time_range: '7d',
-      });
+    const [engagementData, signupTrendData, topChaptersData] = await Promise.all([
+      apiClient.post<any>('/api/supabase/rest/v1/rpc/get_user_engagement_summary', { p_time_range: '7d' }).catch(() => null),
+      apiClient.post<any>('/api/supabase/rest/v1/rpc/get_signup_trend', { p_days_back: 30 }).catch(() => null),
+      apiClient.post<any>('/api/supabase/rest/v1/rpc/get_top_chapters_by_reads', { p_limit: 5, p_time_range: '7d' }).catch(() => null),
+    ]);
 
     const userEngagement: UserEngagementMetrics = {
       total_users: toNumber(engagementData?.mau ?? 0),
@@ -243,13 +213,8 @@ async function fetchReadOnlySupabaseMetrics(): Promise<{
       storage: [],
     };
 
-    return {
-      userEngagement,
-      contentPerformance,
-      trendData,
-    };
+    return { userEngagement, contentPerformance, trendData };
   } catch {
-    // Gracefully fallback on any error
     return {
       userEngagement: createEmptyUserEngagement(),
       contentPerformance: createEmptyContentPerformance(),
@@ -272,7 +237,6 @@ function applyRoleRestrictions(
   if (role === 'superadmin' || role === 'admin') {
     return { userEngagement, contentPerformance, infrastructure, restricted: false };
   }
-
   return {
     userEngagement,
     contentPerformance: {

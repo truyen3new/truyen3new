@@ -1,0 +1,19 @@
+
+> react-example@0.0.0 predev
+> node scripts/import_root_env.mjs
+
+Imported selected root env entries into frontend/.env.local.
+
+> react-example@0.0.0 dev
+> next dev -p 3001 -H 0.0.0.0
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://0.0.0.0:3001
+- Environments: .env.local
+✓ Ready in 442ms
+- Experiments (use with caution):
+  · optimizePackageImports
+
+ GET /admin 200 in 315ms (next.js: 124ms, application-code: 191ms)
+ GET /admin 200 in 76ms (next.js: 5ms, application-code: 71ms)
