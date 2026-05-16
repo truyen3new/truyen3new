@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { parseSiteSettingsRows, type AdSlotKey, validateAdMarkup } from '@/lib/adPolicy';
+import { apiClient } from '@/lib/apiClient';
 
 type SiteSettingItem = { key: string; value: unknown };
 
@@ -22,13 +23,8 @@ const slotKeyByPosition: Record<AdRendererProps['position'], AdSlotKey> = {
 };
 
 const fetchAdRuntime = async (): Promise<SiteSettingItem[]> => {
-  const res = await fetch('/api/site-settings?scope=public', { cache: 'no-store' });
-  if (!res.ok) {
-    throw new Error('Failed to fetch ad settings');
-  }
-
-  const json = (await res.json()) as { data?: SiteSettingItem[] };
-  return Array.isArray(json.data) ? json.data : [];
+  const result = await apiClient.get<{ data?: SiteSettingItem[] }>('/api/admin/site-settings?scope=public');
+  return result.data ?? [];
 };
 
 const injectMarkup = (container: HTMLDivElement, markup: string): void => {

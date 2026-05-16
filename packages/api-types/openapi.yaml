@@ -1,0 +1,194 @@
+openapi: "3.1.0"
+info:
+  title: Light Story API (skeleton)
+  version: "0.1.0"
+servers:
+  - url: https://api.lightstory.app/api/v1
+    description: Production
+  - url: http://localhost:4010/api/v1
+    description: Mock
+paths:
+  /comics/{comicId}/chapters:
+    post:
+      summary: Upload a new chapter (skeleton)
+      operationId: createChapter
+      tags:
+        - comics
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: comicId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                pages:
+                  type: string
+                cover:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [success]
+                  data:
+                    type: object
+        "401":
+          description: Unauthorized
+  /stories:
+    get:
+      summary: List or get stories
+      operationId: listStories
+      tags: [stories]
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /chapters:
+    get:
+      summary: Get chapters or by story
+      operationId: listChapters
+      tags: [chapters]
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+        - name: storyId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /taxonomy/categories:
+    get:
+      summary: Get categories
+      operationId: getCategories
+      tags: [taxonomy]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+  /rpc/like-story:
+    post:
+      summary: Like a story (RPC)
+      operationId: likeStory
+      tags: [rpc]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                storyId:
+                  type: string
+      responses:
+        "200":
+          description: OK
+  /rpc/unlike-story:
+    post:
+      summary: Unlike a story (RPC)
+      operationId: unlikeStory
+      tags: [rpc]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                storyId:
+                  type: string
+      responses:
+        "200":
+          description: OK
+  /rpc/increment-story-views:
+    post:
+      summary: Increment story views (RPC)
+      operationId: incrementStoryViews
+      tags: [rpc]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                storyId:
+                  type: string
+      responses:
+        "200":
+          description: OK
+  /site-metrics:
+    get:
+      summary: Site metrics
+      operationId: getSiteMetrics
+      tags: [site-metrics]
+      responses:
+        "200":
+          description: OK
+  /site-settings:
+    get:
+      summary: Site settings
+      operationId: getSiteSettings
+      tags: [system]
+      responses:
+        "200":
+          description: OK
+  /role-distribution:
+    get:
+      summary: Role distribution
+      operationId: getRoleDistribution
+      tags: [system]
+      responses:
+        "200":
+          description: OK
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

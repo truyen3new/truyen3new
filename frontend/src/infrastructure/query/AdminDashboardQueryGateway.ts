@@ -1,4 +1,6 @@
 import type { DashboardDataDTO, OverviewMetricsDTO } from '@/application/dtos/dashboard';
+import type { DashboardQueryGateway } from '@/application/use-cases/GetDashboardDataUseCase';
+import type { OverviewMetricsGateway } from '@/application/use-cases/GetOverviewMetricsUseCase';
 
 function emptyDashboardData(): DashboardDataDTO {
   return {
@@ -8,14 +10,12 @@ function emptyDashboardData(): DashboardDataDTO {
   };
 }
 
-export class AdminDashboardQueryGateway {
+export class AdminDashboardQueryGateway implements DashboardQueryGateway, OverviewMetricsGateway {
   async loadDashboardData(): Promise<DashboardDataDTO> {
     return emptyDashboardData();
   }
 
   async loadOverviewMetrics(): Promise<OverviewMetricsDTO> {
-    // Note: This is currently a client-side gateway, so it cannot use server-side Supabase.
-    // To fetch real metrics, use API endpoints instead (e.g., /api/internal/admin/profiles)
     return {
       profileCount: 0,
       chapterCount: 0,

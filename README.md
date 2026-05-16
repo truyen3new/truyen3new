@@ -1,70 +1,80 @@
 # Light Story
 
-Light Story is an online reading platform with a Next.js frontend, Supabase backend, and a Cloudflare Workers D1 backend. Includes a comic platform with semantic search, VIP content gating, and real-time updates.
+Light Story is an online reading platform with a Next.js frontend, Supabase backend, and Cloudflare Workers backend (D1 + R2). Includes a comic platform with semantic search, VIP content gating, real-time updates, and a fully decoupled API Gateway architecture.
 
 ## Quick Links
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Testing](docs/TESTING.md)
-- [Real Data Setup](docs/REAL_DATA.md)
-- [Staging Runbook](docs/STAGING_RUNBOOK.md)
-- [Frontend Architecture](frontend/ARCHITECTURE.md)
-- [Backend Analytics Setup](backend-supabase/docs/ANALYTICS_WORKER_SETUP.md)
-
-### Comic Platform (New)
-
-- [Comic Platform Deployment](docs/STAGING_DEPLOYMENT_COMIC_PLATFORM.md)
-- [Edge Function Setup](docs/DEPLOY_EDGE_FUNCTIONS.md)
-- [R2 Worker Setup](docs/DEPLOY_R2_WORKER.md)
-- [Cloudflare R2 Integration](docs/CLOUDFLARE_R2_DEPLOYMENT.md)
-- [Database Schema](backend-supabase/docs/db-schema.md)
-- [Test Suite](backend-supabase/supabase/tests/README.md)
+| Area | Document |
+|---|---|
+| Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Testing | [docs/TESTING.md](docs/TESTING.md) |
+| Real Data Setup | [docs/REAL_DATA.md](docs/REAL_DATA.md) |
+| Staging Runbook | [docs/STAGING_RUNBOOK.md](docs/STAGING_RUNBOOK.md) |
+| Worker Deployment | [docs/WORKERS_DEPLOYMENT.md](docs/WORKERS_DEPLOYMENT.md) |
+| Frontend Architecture | [frontend/ARCHITECTURE.md](frontend/ARCHITECTURE.md) |
+| API Gateway | [workers/api-gateway/README.md](workers/api-gateway/README.md) |
+| Backend D1 SaaS | [backend-d1-saas/README.md](backend-d1-saas/README.md) |
+| Supabase Schema | [backend-supabase/docs/db-schema.md](backend-supabase/docs/db-schema.md) |
+| Edge Functions | [docs/DEPLOY_EDGE_FUNCTIONS.md](docs/DEPLOY_EDGE_FUNCTIONS.md) |
+| Env Reference | [Instruction_create_key.md](Instruction_create_key.md) |
+| API Test Spec | [API_test.md](API_test.md) |
 
 ## Repository Layout
 
 ```text
-frontend/          Next.js application
-backend-supabase/  Supabase migrations, functions, tests, and docs
-backend-d1-saas/   Cloudflare Workers D1 backend
-docs/              Canonical architecture, testing, setup, and archive docs
-scripts/           Root helper scripts
-src/               Shared root-level code
-workers/           Cloudflare Workers (R2 proxy, etc)
+packages/
+  api-types/              OpenAPI spec + generated TS types (shared contract)
+frontend/                 Next.js application (pure presentation)
+workers/
+  api-gateway/            API Gateway Worker — JWT, CORS, routing
+  comics-worker/          Comic/chapter CRUD on D1
+  stories-worker/         Story CRUD on D1
+  analytics-worker/       Dashboard analytics aggregation
+  admin-worker/           Admin operations, audit logs
+  r2-proxy/               JWT-gated R2 asset proxy
+backend-supabase/         Supabase migrations, functions, tests, and docs
+backend-d1-saas/          Monolithic D1 SaaS backend (legacy, being migrated)
+docs/                     Canonical architecture, testing, deployment docs
 ```
 
 ## Local Development
 
-From the repository root:
-
 ```bash
+npm --prefix packages/api-types run generate   # Generate TS types from OpenAPI spec
 npm --prefix frontend install
-npm --prefix frontend run dev
-npm --prefix frontend run build
+npm --prefix frontend run dev                  # Next.js on port 3001
+
+# Workers (each in its own terminal)
+npm --prefix workers/api-gateway run dev       # Gateway on port 8787
+npm --prefix workers/comics-worker run dev     # Domain workers on separate ports
+
+# Supabase
+cd backend-supabase
+supabase start                                 # Local Supabase on port 54321
 ```
 
-For backend validation, use the package-specific commands documented in [docs/TESTING.md](docs/TESTING.md).
-
-## Comic Platform Features
+## Platform Features
 
 - **Semantic Search**: Vector-based search using pgvector (1536-dimensional embeddings)
 - **VIP Content Gating**: Row-level security policies protect premium chapters
 - **Real-time Updates**: Supabase Realtime subscriptions for live chapter changes
 - **Edge Functions**: Serverless webhooks for payments and rewards
-- **Asset Proxy**: Cloudflare R2 with JWT-based access control
-- **Role-based Access**: Admin panel for content management
+- **Asset Proxy**: Cloudflare R2 with JWT + HMAC signed URL access control
+- **Role-based Access**: Admin panel for content management (superadmin, admin, employee, user)
+- **API Gateway**: Single entry point with JWT validation, rate limiting, and strict CORS
 
 ## Runtime Notes
 
-- Use `NEXT_PUBLIC_*` variables in the browser.
-- Keep `SUPABASE_SERVICE_ROLE_KEY` and `INTERNAL_ADMIN_SECRET` server-side only.
-- Internal admin routes live under `/api/internal/admin/*`.
-- Comic platform uses `search_stories()` RPC and `chapters` realtime subscriptions.
+- Use `NEXT_PUBLIC_*` variables in the browser; keep secrets server-side.
+- Internal admin routes live under `/api/internal/admin/*` (being migrated to `/api/v1/*`).
+- Workers use service bindings for inter-worker communication (no public DNS between them).
 
 ## Canonical Docs
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/TESTING.md](docs/TESTING.md)
 - [docs/REAL_DATA.md](docs/REAL_DATA.md)
-- [docs/ARCHIVE/README.md](docs/ARCHIVE/README.md)
+- [docs/STAGING_RUNBOOK.md](docs/STAGING_RUNBOOK.md)
+- [docs/WORKERS_DEPLOYMENT.md](docs/WORKERS_DEPLOYMENT.md)
 
 

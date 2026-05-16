@@ -1,40 +1,28 @@
-/**
- * Infrastructure Layer - Supabase Chapter Repository
- * Implements the IChapterRepository interface for data persistence
- */
-
 import { Chapter } from '@/types/entities';
 import { IChapterRepository } from '@/domain/interfaces';
-import { getPrivilegedAuthHeadersWithInternal as getPrivilegedAuthHeaders } from '@/lib/requestAuth';
-
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  return getPrivilegedAuthHeaders();
-}
+import { apiClient } from '@/lib/apiClient';
 
 export class SupabaseChapterRepository implements IChapterRepository {
   async getChapterById(id: string): Promise<Chapter | null> {
-    const res = await fetch(`/api/chapters?id=${encodeURIComponent(id)}`);
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.data ?? null;
+    try {
+      return await apiClient.get<Chapter | null>(`/api/chapters?id=${encodeURIComponent(id)}`);
+    } catch {
+      return null;
+    }
   }
 
   async getChaptersByStoryId(storyId: string): Promise<Chapter[]> {
-    const res = await fetch(`/api/chapters?storyId=${encodeURIComponent(storyId)}`);
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.data ?? [];
+    try {
+      return await apiClient.get<Chapter[]>(`/api/chapters?storyId=${encodeURIComponent(storyId)}`);
+    } catch {
+      return [];
+    }
   }
 
   async saveChapter(chapter: Partial<Chapter>): Promise<Chapter> {
-    const authHeaders = await getAuthHeaders();
-    const res = await fetch('/api/internal/admin/manage-chapter', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ chapter }) });
-    if (!res.ok) throw new Error('Request failed');
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    const created = await this.getChapterById(json.chapter.id);
-    if (!created) throw new Error('Chapter was created but could not be retrieved');
-    return created;
+    const created = await apiClient.post<{ chapter: Chapter }>('/api/admin/manage-chapter', { chapter });
+    if (!created.chapter) throw new Error('Chapter was created but server did not return the record');
+    return created.chapter;
   }
 }
 

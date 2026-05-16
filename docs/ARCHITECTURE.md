@@ -23,7 +23,9 @@ This is the canonical repository-wide reference for how Light Story code is orga
 - `frontend/src/presentation` and `frontend/src/app` handle UI and API entry points.
 - `frontend/src/services/analytics.service.ts` reads `CLOUDFLARE_ANALYTICS_WORKER_URL` for infrastructure analytics data and must stay browser-safe.
 
-### Backend D1 SaaS
+### Backend D1 SaaS (Legacy)
+
+> **⚠️ LEGACY:** This monolithic Worker is being replaced by decoupled domain workers under `workers/`. See the Cloudflare Workers section below and `plan_FEBE.md`.
 
 - `backend-d1-saas/src/shared/core` holds shared runtime utilities, error handling, logging, and result helpers.
 - `backend-d1-saas/src` organizes worker handlers, provisioning flows, and tenant operations.
@@ -64,12 +66,62 @@ This is the canonical repository-wide reference for how Light Story code is orga
   - `payment_and_rewards.test.ts`: Edge Function handler tests
   - `worker.test.js`: R2 Worker JWT and gating tests
 
-### Cloudflare Workers (R2 Asset Proxy)
+### Cloudflare Workers (Decoupled Architecture)
 
-- `workers/r2-signed-url/` handles asset gating and caching
-- JWT payload includes role for authorization decisions
-- Edge-cached responses minimize origin load
+Light Story migrated from a monolithic `backend-d1-saas/` Worker to a gateway-driven domain worker architecture. All workers use **ES modules syntax** with `wrangler.jsonc` config.
 
+#### Routing Table
+
+| Worker | Type | Public URL | Purpose |
+|--------|------|-----------|---------|
+| `workers/api-gateway/` | Gateway | Yes (`api.*`) | JWT validation, routing, header injection |
+| `workers/comics-worker/` | Domain | No (service binding only) | Comic CRUD, chapters, reading progress |
+| `workers/stories-worker/` | Domain | No (service binding only) | Story CRUD, search, recommendations |
+| `workers/analytics-worker/` | Domain | No (service binding only) | Page views, reading stats, dashboard metrics |
+| `workers/admin-worker/` | Domain | No (service binding only) | Moderation, content management, user mgmt |
+| `workers/r2-signed-url/` | Proxy | Yes (`assets.*`) | Signed asset URLs, role-based gating |
+
+#### Data Flow
+
+```
+Browser/Frontend
+     │
+     ▼  (public URL)
+api-gateway ──► JWT validation (auth.ts)
+     │
+     ├── service binding ──► comics-worker ──► D1 (comics)
+     ├── service binding ──► stories-worker ──► D1 (stories)
+     ├── service binding ──► analytics-worker ──► D1 (analytics)
+     └── service binding ──► admin-worker ──► D1 (admin)
+
+assets.*
+     └── r2-signed-url ──► R2 (assets) + JWT role check
+```
+
+#### Worker Responsibilities
+
+- **API Gateway** (`workers/api-gateway/`): Single entry point for all frontend API requests. Validates JWTs via `auth.ts`, injects `x-user-id` and `x-user-role` headers, routes to the appropriate domain worker via service bindings. Handles CORS at the edge.
+- **Domain Workers** (`workers/*-worker/`): Each owns a distinct D1 database and exposes domain-specific REST endpoints. Read authenticated user info from injected headers (never re-parse JWTs).
+- **R2 Proxy** (`workers/r2-signed-url/`): Handles asset delivery with role-based access control. `premium` and `admin` roles bypass VIP gating. Sets `Cache-Control: public` for public assets, `private` for VIP content.
+
+#### Service Binding Configuration (`wrangler.jsonc`)
+
+```jsonc
+{
+  "name": "api-gateway",
+  "main": "src/index.ts",
+  "workers": [
+    { "binding": "comics",       "service": "comics-worker" },
+    { "binding": "stories",      "service": "stories-worker" },
+    { "binding": "analytics",    "service": "analytics-worker" },
+    { "binding": "admin",        "service": "admin-worker" }
+  ]
+}
+```
+
+#### Legacy Worker
+
+- `backend-d1-saas/` — monolithic Worker now treated as **legacy/reference**. All new development goes into the domain workers above. Migration tracking is in `plan_FEBE.md`.
 
 ## Standard Practices
 
@@ -90,8 +142,9 @@ This is the canonical repository-wide reference for how Light Story code is orga
 
 ## Reference Docs
 
+- `plan_FEBE.md` — active migration blueprint (supersedes `ARCHITECTURE_BLUEPRINT_CLEANUP_2026-05-10.md`)
 - `frontend/ARCHITECTURE.md` (legacy pointer)
-- `docs/ARCHITECTURE_BLUEPRINT_CLEANUP_2026-05-10.md`
+- `docs/WORKERS_DEPLOYMENT.md` — deployment guide for all 6 Cloudflare Workers
 - `agent/OUTPUTS/TechLead_architecture_blueprint.md`
 - `agent/OUTPUTS/Developer_code_templates.md`
 - `agent/OUTPUTS/Tester_architecture_validation.md`

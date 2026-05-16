@@ -1,22 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/lib/apiClient';
 
 export type AdSettingItem = { key: string; value: unknown };
 
 async function fetchAdConfigs() {
-  const res = await fetch('/api/site-settings?scope=admin', { cache: 'no-store' });
-  if (!res.ok) throw new Error('Failed to fetch ad settings');
-  const json = await res.json();
-  return (json.data ?? []) as AdSettingItem[];
+  const result = await apiClient.get<{ data?: AdSettingItem[] }>('/api/admin/site-settings?scope=admin');
+  return result.data ?? [];
 }
 
 async function postAdConfig(key: string, value: unknown) {
-  const res = await fetch('/api/site-settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value }),
-  });
-  if (!res.ok) throw new Error('Failed to save ad config');
-  return res.json();
+  return apiClient.post('/api/admin/site-settings', { key, value });
 }
 
 export function useAdConfigsQuery() {

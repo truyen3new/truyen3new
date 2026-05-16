@@ -6,7 +6,7 @@ import { AdminClient } from "../client";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const TEST_BASE_URL = loadEnvValue("BACKEND_BASE_URL") ?? "http://localhost:8788";
+const TEST_BASE_URL = process.env.BACKEND_BASE_URL ?? loadEnvValue("BACKEND_BASE_URL") ?? "http://localhost:8787";
 
 function loadEnvValue(name: string): string | undefined {
   const envPath = resolve(process.cwd(), "..", ".env");
@@ -19,7 +19,7 @@ function loadEnvValue(name: string): string | undefined {
   return match?.[1]?.trim();
 }
 
-const TEST_ADMIN_KEY = loadEnvValue("ADMIN_API_KEY") ?? "test-admin-key-12345";
+const TEST_ADMIN_KEY = process.env.ADMIN_API_KEY ?? loadEnvValue("ADMIN_API_KEY") ?? "test-admin-key-12345";
 
 describe("AdminClient", () => {
   const client = new AdminClient({

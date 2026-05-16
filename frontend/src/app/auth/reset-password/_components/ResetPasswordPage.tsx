@@ -21,15 +21,8 @@ export const ResetPasswordPage: React.FC = () => {
 
     const verifyRecovery = async () => {
       try {
-        const res = await fetch('/api/auth/verify-recovery');
-        if (!res.ok) {
-          setIsRecoveryFlow(type === 'recovery');
-        } else {
-          const json = await res.json();
-          const hasSession = Boolean(json.hasSession);
-          const fromRecoveryLink = type === 'recovery';
-          setIsRecoveryFlow(fromRecoveryLink || hasSession);
-        }
+        const fromRecoveryLink = type === 'recovery';
+        setIsRecoveryFlow(fromRecoveryLink);
       } finally {
         setVerifying(false);
       }

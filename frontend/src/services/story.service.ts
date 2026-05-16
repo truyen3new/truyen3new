@@ -1,28 +1,31 @@
-import SupabaseStoryRepository from "./repositories/SupabaseStoryRepository";
+import { Story } from '@/types/entities';
+import { apiClient } from '@/lib/apiClient';
 
-const repo = new SupabaseStoryRepository();
+type StoryListResponse = Story[] | { items: Story[] };
 
 export async function fetchStories(params?: {
   page?: number;
   pageSize?: number;
   keyword?: string;
-}) {
-  if (!params) return repo.getStories();
-  const page = params.page ?? 1;
-  const pageSize = params.pageSize ?? 10;
-  return repo.getStoriesPage({ page, pageSize, keyword: params.keyword });
+}): Promise<StoryListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  if (params?.keyword) searchParams.set('keyword', params.keyword);
+  const qs = searchParams.toString();
+  return apiClient.get<StoryListResponse>(`/api/stories${qs ? `?${qs}` : ''}`);
 }
 
 export async function fetchStoryById(id: string) {
-  return repo.getStoryById(id);
+  return apiClient.get<Story>(`/api/stories/${id}`);
 }
 
 export async function incrementViews(storyId: string) {
-  return repo.incrementViews(storyId);
+  return apiClient.post(`/api/rpc/increment-story-views`, { storyId });
 }
 
 export async function saveStory(story: Partial<any>) {
-  return repo.saveStory(story);
+  return apiClient.post(`/api/stories`, story);
 }
 
 export default {

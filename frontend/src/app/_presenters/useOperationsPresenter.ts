@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '@/lib/apiClient';
 
 async function fetchCount(type: 'profiles' | 'chapters') {
-  const res = await fetch(`/api/site-metrics?type=${type}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Failed to fetch ${type}`);
-  const json = await res.json();
-  return json.count as number;
+  const result = await apiClient.get<{ count: number }>(`/api/admin/site-metrics?type=${type}`);
+  return result.count;
 }
 
 export function useProfileCountQuery() {

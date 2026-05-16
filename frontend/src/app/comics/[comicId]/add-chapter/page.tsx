@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createComicChapter, loadComicContext, type ComicContext, uploadChapterImages } from "@/services/comic.service";
+import { createComicChapter, uploadChapterImages } from "@/services/comic.service";
+import { useSearchParams } from 'next/navigation';
 
 type ImageEntry = {
   id: string;
@@ -13,21 +14,21 @@ type ImageEntry = {
 
 export default function AddChapter({ params }: { params: { comicId: string } }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { comicId } = params;
+  const storyId = searchParams.get('storyId') ?? '';
+  const tenantKey = searchParams.get('tenantKey') ?? '';
   const [title, setTitle] = useState("");
   const [chapterNumber, setChapterNumber] = useState(1);
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [comicContext, setComicContext] = useState<ComicContext | null>(null);
   const [comicError, setComicError] = useState<string | null>(null);
 
   useEffect(() => {
-    const next = loadComicContext(comicId);
-    setComicContext(next);
-    if (!next) {
+    if (!storyId || !tenantKey) {
       setComicError("Comic context was not found. Please create the comic again from the dashboard.");
     }
-  }, [comicId]);
+  }, [storyId, tenantKey]);
 
   const handleFiles = (fileList: FileList | null) => {
     if (!fileList) return;
@@ -69,7 +70,7 @@ export default function AddChapter({ params }: { params: { comicId: string } }) 
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!comicContext) return alert("Comic context was not found");
+    if (!storyId || !tenantKey) return alert("Comic context was not found");
     if (images.length === 0) return alert("Select at least one image");
     setLoading(true);
 
@@ -79,8 +80,8 @@ export default function AddChapter({ params }: { params: { comicId: string } }) 
     try {
       await createComicChapter({
         comicId,
-        tenantKey: comicContext.tenantKey,
-        storyId: comicContext.storyId,
+        tenantKey,
+        storyId,
         chapterNumber,
         title,
         content: urls,
@@ -135,7 +136,7 @@ export default function AddChapter({ params }: { params: { comicId: string } }) 
         )}
 
         <div>
-          <button type="submit" disabled={loading || !comicContext} className="w-full inline-flex items-center justify-center rounded-md bg-primary-600 text-white py-2 px-4 disabled:opacity-60">
+          <button type="submit" disabled={loading || !!comicError} className="w-full inline-flex items-center justify-center rounded-md bg-primary-600 text-white py-2 px-4 disabled:opacity-60">
             {loading ? 'Saving…' : 'Add Chapter'}
           </button>
         </div>
