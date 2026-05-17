@@ -37,8 +37,6 @@ frontend/.upload_test.txt
 scripts/full_flow_test.mjs
 LOCAL_TESTING_GUIDE.md
 API_Testing_Instructions.md
-backend-d1-saas/RECOVERY.md
-backend-d1-saas/TESTING.md
 
 # Unused root-level documentation (canonical copies in docs/)
 ACCESS_REAL_DATA.md
@@ -59,17 +57,8 @@ metadata.json
 # Orphaned frontend code
 frontend/src/lib/middleware.ts
 frontend/src/examples/
-frontend/scripts/DEPRECATED.md
-frontend/scripts/dedupe_env.mjs
-frontend/scripts/force_srk.mjs
-frontend/scripts/localize_srk.mjs
-frontend/scripts/run_checks.mjs
-frontend/scripts/set_service_role_key.mjs
 
-# Orphaned backend code
-backend-d1-saas/src/provisioning.ts
-backend-d1-saas/schema/
-backend-d1-saas/smoke-tests.mjs
+
 
 # Duplicate nested packages
 backend-supabase/backend-supabase/
@@ -78,6 +67,7 @@ backend-supabase/backend-supabase/
 frontend/supabase/.temp/
 .venv/
 frontend/frontend/
+backend-supabase/supabase/scripts/node_modules/
 
 # Env key instruction document (contains example values)
 Instruction_create_key.md

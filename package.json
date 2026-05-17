@@ -16,7 +16,7 @@
     "dev:admin": "npx wrangler dev --port 9003",
     "dev:analytics": "npx wrangler dev --port 9004",
     "build": "npm --prefix frontend run build",
-    "check": "npm --prefix frontend run build && npm --prefix backend-d1-saas run check",
+    "check": "npm --prefix frontend run build",
     "lint": "npm --prefix frontend run lint",
     "preview": "npm --prefix frontend run preview",
     "generate:types": "npm --prefix packages/api-types run generate"
