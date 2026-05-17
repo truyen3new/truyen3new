@@ -1,0 +1,14 @@
+{
+  "name": "lightstory-r2-proxy",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-17",
+  "vars": {
+    "ASSETS_SIGN_SECRET": ""
+  },
+  "r2_buckets": [
+    {
+      "binding": "ASSETS_BUCKET",
+      "bucket_name": "lightstory-assets"
+    }
+  ]
+}

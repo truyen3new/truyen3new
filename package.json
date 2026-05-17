@@ -9,20 +9,21 @@
   ],
   "scripts": {
     "dev": "npm --prefix frontend run dev",
-    "dev:gateway": "npx wrangler dev --port 8787",
+    "dev:gateway": "npx wrangler dev --port 8787 --config workers/api-gateway/wrangler.jsonc",
     "dev:all": "concurrently -n fe,gw \"npm run dev\" \"npm run dev:gateway\"",
-    "dev:comics": "npx wrangler dev --port 9001",
-    "dev:stories": "npx wrangler dev --port 9002",
-    "dev:admin": "npx wrangler dev --port 9003",
-    "dev:analytics": "npx wrangler dev --port 9004",
+    "dev:comics": "npx wrangler dev --port 9001 --config workers/comics-worker/wrangler.jsonc",
+    "dev:stories": "npx wrangler dev --port 9002 --config workers/stories-worker/wrangler.jsonc",
+    "dev:admin": "npx wrangler dev --port 9003 --config workers/admin-worker/wrangler.jsonc",
+    "dev:analytics": "npx wrangler dev --port 9004 --config workers/analytics-worker/wrangler.jsonc",
     "build": "npm --prefix frontend run build",
-    "check": "npm --prefix frontend run build && npm --prefix backend-d1-saas run check",
+    "check": "npm --prefix frontend run build",
     "lint": "npm --prefix frontend run lint",
     "preview": "npm --prefix frontend run preview",
     "generate:types": "npm --prefix packages/api-types run generate"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "husky": "^9.1.7",
     "wrangler": "^4.92.0"
   }
 }

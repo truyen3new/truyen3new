@@ -1,0 +1,97 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  NODE_VERSION: '22'
+  CACHE_KEY: node-modules-${{ hashFiles('**/package-lock.json') }}
+
+jobs:
+  # Stage 1: Validate & Test
+  validate:
+    name: Lint, Build, Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (TypeScript strict)
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run tests
+        run: npm run test:run
+
+  # Stage 2: Deploy (only on main branch)
+  deploy:
+    name: Deploy to Cloudflare
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy API Gateway Worker
+        run: npx wrangler deploy --config workers/api-gateway/wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy Domain Workers
+        run: |
+          npx wrangler deploy --config workers/comics-worker/wrangler.jsonc
+          npx wrangler deploy --config workers/stories-worker/wrangler.jsonc
+          npx wrangler deploy --config workers/analytics-worker/wrangler.jsonc
+          npx wrangler deploy --config workers/admin-worker/wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Run D1 migrations (zero-downtime)
+        run: npx wrangler migrations apply --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Smoke test deployment
+        run: |
+          for i in {1..5}; do
+            if curl -f https://api.light-story.com/health -H "Authorization: Bearer test" > /dev/null 2>&1; then
+              echo "✅ Smoke test passed"
+              exit 0
+            fi
+            echo "Attempt $i/5 failed, retrying..."
+            sleep 5
+          done
+          echo "❌ Smoke test failed"
+          exit 1
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Deployment to production failed!'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

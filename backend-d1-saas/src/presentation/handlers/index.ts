@@ -1,1 +1,0 @@
-export { createTenantHandler } from './CreateTenantHandler';
