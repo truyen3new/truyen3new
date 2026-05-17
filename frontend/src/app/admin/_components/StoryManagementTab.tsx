@@ -25,7 +25,7 @@ export const StoryManagementTab: React.FC = () => {
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [page, setPage] = useState(1);
   const { role } = useAuth();
-  const canManageStories = role === 'superadmin' || role === 'admin';
+  const canManageStories = role === 'superadmin' || role === 'admin' || role === 'employee';
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingStory, setEditingStory] = useState<StoryEditForm | null>(null);
 
@@ -392,4 +392,3 @@ export const StoryManagementTab: React.FC = () => {
     </div>
   );
 };
-

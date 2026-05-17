@@ -47,7 +47,7 @@ const menuItems: SidebarItem[] = [
     icon: "💰",
     roles: ["superadmin", "admin"],
   },
-  { id: "settings", label: "Site Settings", icon: "⚙️", roles: ["superadmin"] },
+  { id: "settings", label: "Site Settings", icon: "⚙️", roles: ["superadmin", "admin"] },
 ];
 
 export const DashboardSidebar: React.FC<{

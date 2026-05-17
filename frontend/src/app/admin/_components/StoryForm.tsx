@@ -17,7 +17,7 @@ import { useStoryFormPresenter } from '@/hooks/useStoryFormPresenter';
 
 export const StoryForm: React.FC = () => {
   const { role } = useAuth();
-  const canManageStories = role === 'superadmin' || role === 'admin';
+  const canManageStories = role === 'superadmin' || role === 'admin' || role === 'employee';
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string>("");
   const [fileInputKey, setFileInputKey] = useState(0);
@@ -285,4 +285,3 @@ export const StoryForm: React.FC = () => {
     </div>
   );
 };
-
