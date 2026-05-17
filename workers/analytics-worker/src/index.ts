@@ -38,8 +38,9 @@ async function handleRes(res: Response): Promise<Response> {
     const text = await res.text();
     return err('SUPABASE_ERROR', text, res.status);
   }
-  const data = await res.json();
-  return json(data);
+  const text = await res.text();
+  if (!text) return json({ success: true });
+  return json(JSON.parse(text));
 }
 
 export default {
@@ -51,10 +52,13 @@ export default {
 
     try {
       if (method === 'GET' && path === '/analytics/overview') {
-        const totalStories = await (await sbGet('stories', 'select=id&limit=0', env, token)).json().then((d: any) => Array.isArray(d) ? d.length : 0).catch(() => 0);
+        const totalRes = await sbGet('stories', 'select=id', env, token);
+        const totalData = await totalRes.json();
+        const totalStories = Array.isArray(totalData) ? totalData.length : 0;
         const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
         const recentChapters = await sbGet('chapters', `select=id&created_at=gte.${sevenDaysAgo}`, env, token);
-        const chaptersCount = Array.isArray(recentChapters.ok ? await recentChapters.json() : []) ? (await recentChapters.json() as any[]).length : 0;
+        const chaptersData = recentChapters.ok ? await recentChapters.json() : [];
+        const chaptersCount = Array.isArray(chaptersData) ? (chaptersData as any[]).length : 0;
         return json({ totalStories, recentChapters: chaptersCount, generatedAt: new Date().toISOString() });
       }
 
@@ -72,7 +76,7 @@ export default {
 
       if (method === 'POST' && path === '/analytics/record-view') {
         const body = await request.json() as any;
-        const res = await sbRpc('increment_story_views', { story_id: body.storyId }, env, token);
+        const res = await sbRpc('increment_story_views', { story_id_param: body.storyId }, env, token);
         return handleRes(res);
       }
 
