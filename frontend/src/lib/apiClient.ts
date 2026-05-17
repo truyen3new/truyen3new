@@ -1,8 +1,25 @@
+/**
+ * API Response envelope from backend (all endpoints wrap responses).
+ * This mirrors packages/api-types/index.ts ApiResponse<T>
+ */
+interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: Record<string, any>;
+  };
+  timestamp: string;
+  correlationId?: string;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
     message: string,
+    public correlationId?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -47,16 +64,42 @@ async function request<T>(
     headers,
   });
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
+  const bodyText = await res.text();
+  let body: ApiResponse<T>;
+  
+  try {
+    body = JSON.parse(bodyText) as ApiResponse<T>;
+  } catch {
+    // Fallback for non-JSON responses (legacy or errors)
     throw new ApiError(
       res.status,
-      body?.error?.code ?? 'UNKNOWN',
-      body?.error?.message ?? res.statusText,
+      'PARSE_ERROR',
+      'Failed to parse API response',
     );
   }
 
-  return res.json() as Promise<T>;
+  // Check HTTP status first
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      body?.error?.code ?? 'HTTP_ERROR',
+      body?.error?.message ?? res.statusText,
+      body?.correlationId,
+    );
+  }
+
+  // Check API response status
+  if (!body.success) {
+    throw new ApiError(
+      res.status,
+      body.error?.code ?? 'API_ERROR',
+      body.error?.message ?? 'API request failed',
+      body.correlationId,
+    );
+  }
+
+  // Unwrap and return data
+  return body.data as T;
 }
 
 export const apiClient = {
