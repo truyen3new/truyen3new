@@ -74,6 +74,26 @@ export default {
         return handleRes(res);
       }
 
+      if (method === 'GET' && path === '/analytics/infrastructure') {
+        return json({
+          r2_usage_gb: 0,
+          r2_allocated_gb: 0,
+          r2_object_count: 0,
+          r2_egress_gb: 0,
+          d1_queries_count: 0,
+          d1_avg_latency_ms: 0,
+          page_views: 0,
+          bandwidth_gb: 0,
+          cache_hit_ratio_pct: 0,
+          storage_efficiency_pct: 0,
+          device_mobile: 0,
+          device_desktop: 0,
+          device_tablet: 0,
+          top_zones: [],
+          recorded_at: new Date().toISOString(),
+        });
+      }
+
       if (method === 'POST' && path === '/analytics/record-view') {
         const body = await request.json() as any;
         const res = await sbRpc('increment_story_views', { story_id_param: body.storyId }, env, token);

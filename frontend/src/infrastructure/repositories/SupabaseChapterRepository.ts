@@ -20,9 +20,10 @@ export class SupabaseChapterRepository implements IChapterRepository {
   }
 
   async saveChapter(chapter: Partial<Chapter>): Promise<Chapter> {
-    const created = await apiClient.post<{ chapter: Chapter }>('/api/admin/manage-chapter', { chapter });
-    if (!created.chapter) throw new Error('Chapter was created but server did not return the record');
-    return created.chapter;
+    const result = await apiClient.post<Chapter[] | { chapter: Chapter }>('/api/admin/manage-chapter', { chapter });
+    const created = Array.isArray(result) ? result[0] : result.chapter;
+    if (!created) throw new Error('Chapter was created but server did not return the record');
+    return created;
   }
 }
 

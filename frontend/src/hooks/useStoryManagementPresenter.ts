@@ -5,7 +5,7 @@ import { SupabaseStoryRepository } from '@/infrastructure/repositories/SupabaseS
 import { Story } from '@/types/entities';
 import { rejectDbChangeToast, resolveDbChangeToast, startDbChangeToast } from '@/lib/dbChangeToast';
 
-type StatusFilter = 'all' | 'ongoing' | 'completed';
+type StatusFilter = 'all' | 'draft' | 'published' | 'ongoing' | 'completed';
 type SortMode = 'newest' | 'oldest' | 'most_viewed';
 type StoryStatus = Story['status'];
 

@@ -5,7 +5,7 @@ import { Story } from '@/types/entities';
 import { getErrorMessage } from '@/lib/errorUtils';
 import { useStoryManagementPresenter } from '@/hooks/useStoryManagementPresenter';
 
-type StatusFilter = 'all' | 'ongoing' | 'completed';
+type StatusFilter = 'all' | 'draft' | 'published' | 'ongoing' | 'completed';
 type SortMode = 'newest' | 'oldest' | 'most_viewed';
 type StoryStatus = Story['status'];
 
@@ -146,6 +146,8 @@ export const StoryManagementTab: React.FC = () => {
             className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary/30"
           >
             <option value="all">All status</option>
+            <option value="draft">Draft</option>
+            <option value="published">Published</option>
             <option value="ongoing">Ongoing</option>
             <option value="completed">Completed</option>
           </select>
@@ -359,6 +361,8 @@ export const StoryManagementTab: React.FC = () => {
                   onChange={(e) => setEditingStory({ ...editingStory, status: e.target.value as StoryStatus })}
                   className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm font-semibold"
                 >
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
                   <option value="ongoing">Ongoing</option>
                   <option value="completed">Completed</option>
                 </select>

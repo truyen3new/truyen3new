@@ -67,17 +67,22 @@ function base64UrlToUint8Array(input: string): Uint8Array {
 }
 
 async function verifyJwtSignature(token: string, jwk: any): Promise<boolean> {
-  // Import JWK as CryptoKey
-  const alg = jwk.alg ?? 'RS256';
+  let importAlg: any;
+  let verifyAlg: any;
+  if (jwk.kty === 'EC') {
+    importAlg = { name: 'ECDSA', namedCurve: jwk.crv || 'P-256' };
+    verifyAlg = { name: 'ECDSA', hash: { name: 'SHA-256' } };
+  } else {
+    importAlg = { name: 'RSASSA-PKCS1-v1_5', hash: { name: 'SHA-256' } };
+    verifyAlg = importAlg;
+  }
   const keyUsages: KeyUsage[] = ['verify'];
-  // Use object form for hash for better runtime compatibility
-  const cryptoKey = await crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    { name: 'RSASSA-PKCS1-v1_5', hash: { name: 'SHA-256' } },
-    false,
-    keyUsages
-  );
+  let cryptoKey: CryptoKey;
+  try {
+    cryptoKey = await crypto.subtle.importKey('jwk', jwk, importAlg, false, keyUsages);
+  } catch {
+    return false;
+  }
 
   const parts = token.split('.');
   if (parts.length !== 3) return false;
@@ -86,15 +91,9 @@ async function verifyJwtSignature(token: string, jwk: any): Promise<boolean> {
   const encoder = new TextEncoder();
   const data = encoder.encode(signingInput);
 
-  return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, signature, data);
+  return await crypto.subtle.verify(verifyAlg, cryptoKey, signature, data);
 }
 
-/**
- * Lightweight JWT validation stub.
- * NOTE: This implementation decodes the JWT and checks `exp`/`nbf` claims but
- * does NOT verify the signature. Use a proper JWKS+signature verification in
- * production (see TechLead_architecture.md TODOs).
- */
 export async function validateJWT(token: string): Promise<AuthContext> {
   if (!token) throw new UnauthorizedError('Missing token');
   const cleaned = token.trim().replace(/^Bearer\s+/i, '');
@@ -112,68 +111,91 @@ export async function validateJWT(token: string): Promise<AuthContext> {
   const userId = payload.sub ?? payload.user_id ?? payload.uid;
   if (!userId) throw new UnauthorizedError('Missing subject (sub) in token');
 
-  const role = payload.app_metadata?.role ?? payload.role ?? 'user';
+  let role = payload.app_metadata?.role ?? payload.user_metadata?.role ?? payload.role ?? 'user';
   const email = payload.email ?? undefined;
 
-  // If JWKS URL configured in runtime (globalThis.SUPABASE_JWKS_URL or env-like), verify signature
-  const jwksUrl = (globalThis as any).SUPABASE_JWKS_URL || (globalThis as any).JWKS_URL || undefined;
-  if (jwksUrl) {
-    try {
-      const header = decodeJwtHeader(cleaned);
-      const kid = header.kid;
-      // Fetch JWKS (may be cached)
-      let jwks = await fetchJWKS(jwksUrl);
-      // Select key: prefer kid match, fall back to single-key JWKS
-      let key = null as any;
-      if (Array.isArray(jwks.keys)) {
-        key = kid ? jwks.keys.find((k: any) => k.kid === kid) : null;
-        if (!key && jwks.keys.length === 1) key = jwks.keys[0];
-      }
-      if (!key) {
-        console.warn('validateJWT: JWK not found for token kid; jwks_keys=', Array.isArray(jwks.keys) ? jwks.keys.length : 0);
-        throw new UnauthorizedError('JWK not found for token kid');
-      }
-
-      // Basic key sanity checks
-      if (key.kty !== 'RSA' || !key.n || !key.e) {
-        console.warn('validateJWT: Unsupported JWK type or missing parameters', { kty: key.kty });
-        throw new UnauthorizedError('Unsupported JWK');
-      }
-
-      // Ensure alg matches expected
-      const tokenAlg = header.alg ?? 'RS256';
-      if (tokenAlg !== (key.alg ?? tokenAlg) && tokenAlg !== 'RS256') {
-        console.warn('validateJWT: algorithm mismatch', { tokenAlg, keyAlg: key.alg });
-        throw new UnauthorizedError('Token algorithm unsupported');
-      }
-
-      // Attempt verification; if it fails, try one re-fetch (handle rotation) then fail
-      let ok = false;
-      try {
-        ok = await verifyJwtSignature(cleaned, key);
-      } catch (e) {
-        console.warn('validateJWT: first signature verify attempt failed, will retry once', { err: (e as Error).message });
-      }
-      if (!ok) {
-        // Force refresh JWKS and try again
+  const APP_ROLES = ['superadmin', 'admin', 'employee', 'user'];
+  if (!APP_ROLES.includes(role)) {
+    const sbUrl = (globalThis as any).SUPABASE_URL;
+    const sbKey = (globalThis as any).SUPABASE_ANON_KEY;
+    if (sbUrl && sbKey) {
+      const cacheKey = `__PROFILE_ROLE_${userId}__`;
+      const cache: any = (globalThis as any)[cacheKey];
+      if (cache && cache.role && Date.now() - cache.fetchedAt < 60000) {
+        role = cache.role;
+      } else {
         try {
-          // Invalidate cache and re-fetch
-          const cacheKey = '__JWKS_CACHE__';
-          try { delete (globalThis as any)[cacheKey]; } catch {}
-          jwks = await fetchJWKS(jwksUrl);
-          key = kid ? jwks.keys.find((k: any) => k.kid === kid) : jwks.keys[0];
-          ok = await verifyJwtSignature(cleaned, key);
-        } catch (e2) {
-          console.warn('validateJWT: retry verify failed', { err: (e2 as Error).message });
-        }
+          const profileRes = await fetch(`${sbUrl}/rest/v1/profiles?select=role&id=eq.${encodeURIComponent(userId)}&limit=1`, {
+            headers: { apikey: sbKey, Authorization: `Bearer ${cleaned}` },
+          });
+          if (profileRes.ok) {
+            const profiles = await profileRes.json() as Array<{ role: string }>;
+            if (Array.isArray(profiles) && profiles.length > 0 && profiles[0].role) {
+              role = profiles[0].role;
+              (globalThis as any)[cacheKey] = { role, fetchedAt: Date.now() };
+            }
+          }
+        } catch {}
       }
-      if (!ok) throw new UnauthorizedError('Invalid token signature');
-    } catch (e) {
-      if (e instanceof UnauthorizedError) throw e;
-      console.error('validateJWT: unexpected failure during JWKS verification', { err: (e as Error).message });
-      // If JWKS fetch/verify fails unexpectedly, treat as unauthorized
-      throw new UnauthorizedError('JWT verification failed');
     }
+  }
+
+
+  const jwksUrl = (globalThis as any).SUPABASE_JWKS_URL || (globalThis as any).JWKS_URL || undefined;
+  if (!jwksUrl) {
+   throw new UnauthorizedError('JWT verification not configured');
+  }
+
+  try {
+   const header = decodeJwtHeader(cleaned);
+   const kid = header.kid;
+   let jwks = await fetchJWKS(jwksUrl);
+   let key = null as any;
+   if (Array.isArray(jwks.keys)) {
+     key = kid ? jwks.keys.find((k: any) => k.kid === kid) : null;
+     if (!key && jwks.keys.length === 1) key = jwks.keys[0];
+   }
+   if (!key) {
+     console.warn('validateJWT: JWK not found for token kid; jwks_keys=', Array.isArray(jwks.keys) ? jwks.keys.length : 0);
+     throw new UnauthorizedError('JWK not found for token kid');
+   }
+
+   const isRsa = key.kty === 'RSA' && key.n && key.e;
+   const isEc = key.kty === 'EC' && key.crv && key.x && key.y;
+   if (!isRsa && !isEc) {
+     console.warn('validateJWT: Unsupported JWK type or missing parameters', { kty: key.kty });
+     throw new UnauthorizedError('Unsupported JWK');
+   }
+
+   const tokenAlg = header.alg ?? '';
+   const keyAlg = key.alg ?? '';
+   if (tokenAlg && keyAlg && tokenAlg !== keyAlg) {
+     console.warn('validateJWT: algorithm mismatch', { tokenAlg, keyAlg });
+     throw new UnauthorizedError('Token algorithm unsupported');
+   }
+
+   let ok = false;
+   try {
+     ok = await verifyJwtSignature(cleaned, key);
+   } catch (e) {
+     console.warn('validateJWT: first signature verify attempt failed, will retry once', { err: (e as Error).message });
+   }
+   if (!ok) {
+     try {
+       const cacheKey = '__JWKS_CACHE__';
+       try { delete (globalThis as any)[cacheKey]; } catch {}
+       jwks = await fetchJWKS(jwksUrl);
+       key = kid ? jwks.keys.find((k: any) => k.kid === kid) : jwks.keys[0];
+       ok = await verifyJwtSignature(cleaned, key);
+     } catch (e2) {
+       console.warn('validateJWT: retry verify failed', { err: (e2 as Error).message });
+     }
+   }
+   if (!ok) throw new UnauthorizedError('Invalid token signature');
+  } catch (e) {
+   if (e instanceof UnauthorizedError) throw e;
+   console.error('validateJWT: unexpected failure during JWKS verification', { err: (e as Error).message });
+   throw new UnauthorizedError('JWT verification failed');
   }
 
   return { userId, role, email };

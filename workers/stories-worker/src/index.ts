@@ -101,6 +101,27 @@ export default {
         return err('BAD_REQUEST', 'Missing id or storyId parameter', 400);
       }
 
+      if (method === 'PUT' && path.match(/^\/chapters\/[^\/]+$/)) {
+        const id = path.split('/')[2];
+        const body = await request.json() as any;
+        const payload: Record<string, unknown> = {};
+        if (body.title !== undefined) payload.title = body.title;
+        if (body.content !== undefined) payload.content = body.content;
+        if (body.chapter_number !== undefined) payload.chapter_number = body.chapter_number;
+        const res = await sb(`/rest/v1/chapters?id=eq.${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+          headers: { Prefer: 'return=representation' },
+        }, env, token);
+        return handleRes(res);
+      }
+
+      if (method === 'DELETE' && path.match(/^\/chapters\/[^\/]+$/)) {
+        const id = path.split('/')[2];
+        const res = await sb(`/rest/v1/chapters?id=eq.${id}`, { method: 'DELETE' }, env, token);
+        return res.ok ? json({ success: true }) : handleRes(res);
+      }
+
       if (method === 'POST' && path === '/stories/views') {
         const body = await request.json() as any;
         const res = await sb('/rest/v1/rpc/increment_story_views', {

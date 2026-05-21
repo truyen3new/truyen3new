@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { validateJWT } from '../src/auth';
 
 function base64Url(source: string | Uint8Array) {
@@ -7,6 +7,13 @@ function base64Url(source: string | Uint8Array) {
   else str = Buffer.from(source).toString('base64');
   return str.replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  (globalThis as any).SUPABASE_JWKS_URL = undefined;
+});
 
 describe('validateJWT - JWKS signature verification', () => {
   it('verifies a generated RS256 token using a JWKS stub', async () => {
@@ -39,5 +46,16 @@ describe('validateJWT - JWKS signature verification', () => {
     const ctx = await validateJWT(token);
     expect(ctx.userId).toBe('user-123');
     expect(ctx.email).toBe('test@example.com');
+  });
+
+  it('rejects tokens when JWKS is missing', async () => {
+    const header = { alg: 'none', typ: 'JWT' };
+    const payload = { sub: 'user-123', exp: Math.floor(Date.now() / 1000) + 60 };
+    const token = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(payload))}.sig`;
+
+    await expect(validateJWT(token)).rejects.toMatchObject({
+      name: 'UnauthorizedError',
+      message: 'JWT verification not configured',
+    });
   });
 });

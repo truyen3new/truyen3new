@@ -21,7 +21,7 @@ export async function fetchStoryById(id: string) {
 }
 
 export async function incrementViews(storyId: string) {
-  return apiClient.post(`/api/rpc/increment-story-views`, { storyId });
+  return apiClient.post(`/api/stories/views`, { storyId });
 }
 
 export async function saveStory(story: Partial<any>) {
