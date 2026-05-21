@@ -34,6 +34,18 @@ const BASE_URL = IS_MOCK
   ? 'http://localhost:4010'
   : (process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:8787');
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return true;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    const now = Math.floor(Date.now() / 1000);
+    return payload.exp ? now >= payload.exp - 10 : true;
+  } catch {
+    return true;
+  }
+}
+
 function getAccessToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -44,7 +56,9 @@ function getAccessToken(): string | null {
       const raw = localStorage.getItem(sbKeys[0]);
       if (raw) {
         const session = JSON.parse(raw);
-        if (session?.access_token) return session.access_token;
+        if (session?.access_token && !isTokenExpired(session.access_token)) {
+          return session.access_token;
+        }
       }
     }
   } catch {
