@@ -11,7 +11,7 @@ Local / Preview setup
   wrangler secret put SUPABASE_JWKS_URL --env preview
   ```
 
-- For local development you can either set `SUPABASE_JWKS_URL` in `wrangler dev` environment or edit `wrangler.jsonc` for a non-secret placeholder (not recommended for production).
+- For local development, set `SUPABASE_JWKS_URL` in `wrangler dev` environment or a secret. The gateway now fails closed when JWKS is missing.
 
 Manual test checklist
 

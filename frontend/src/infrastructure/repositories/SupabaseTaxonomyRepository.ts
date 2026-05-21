@@ -1,27 +1,14 @@
 import { Category } from '@/types/entities';
-import { supabase } from '@/infrastructure/supabase/client';
 import { apiClient } from '@/lib/apiClient';
 
 export class SupabaseTaxonomyRepository {
   async getCategories(): Promise<Category[]> {
-    if (!supabase) return [];
-    const { data, error } = await supabase
-      .from('categories')
-      .select('id,name,description,created_at,updated_at')
-      .order('name', { ascending: true });
-    if (error) return [];
-    return (data ?? []) as Category[];
+    return apiClient.get<Category[]>('/api/admin/taxonomy?entity=category');
   }
 
   async getCategoryById(id: string): Promise<Category | null> {
-    if (!supabase) return null;
-    const { data, error } = await supabase
-      .from('categories')
-      .select('id,name,description,created_at,updated_at')
-      .eq('id', id)
-      .maybeSingle();
-    if (error) return null;
-    return (data ?? null) as Category | null;
+    const rows = await apiClient.get<Category[]>('/api/admin/taxonomy?entity=category');
+    return rows.find((row) => row.id === id) ?? null;
   }
 
   async createCategory(payload: { name: string; description?: string | null }) {
@@ -37,13 +24,7 @@ export class SupabaseTaxonomyRepository {
   }
 
   async getAuthors(): Promise<any[]> {
-    if (!supabase) return [];
-    const { data, error } = await supabase
-      .from('authors')
-      .select('id,name,bio,created_at,updated_at')
-      .order('name', { ascending: true });
-    if (error) return [];
-    return (data ?? []) as any[];
+    return apiClient.get<any[]>('/api/admin/taxonomy?entity=author');
   }
 
   async createAuthor(payload: { name: string; bio?: string | null }): Promise<any> {

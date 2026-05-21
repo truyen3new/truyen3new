@@ -19,13 +19,15 @@ const getCreateRoleOptions = (actorRole: UserRole | null): UserRole[] => {
   return ['user'];
 };
 
-const canManageTargetRole = (actorRole: UserRole | null): boolean => {
+const canManageTargetRole = (actorRole: UserRole | null, targetRole?: UserRole): boolean => {
   if (actorRole === 'superadmin') return true;
+  if (actorRole === 'admin') return targetRole === 'employee' || targetRole === 'user';
   return false;
 };
 
 const canAssignRole = (actorRole: UserRole | null, nextRole: UserRole): boolean => {
   if (actorRole === 'superadmin' && nextRole !== 'superadmin') return true;
+  if (actorRole === 'admin' && (nextRole === 'employee' || nextRole === 'user')) return true;
   return false;
 };
 
@@ -42,7 +44,7 @@ export const AdminUserManagement: React.FC = () => {
   const { user: currentUser, role: currentRole, loading: authLoading } = useAuth();
   const canAccessUserManagement = currentRole === 'superadmin' || currentRole === 'admin';
   const canCreateUsers = currentRole === 'superadmin' || currentRole === 'admin';
-  const canManageExistingUsers = currentRole === 'superadmin';
+  const canManageExistingUsers = currentRole === 'superadmin' || currentRole === 'admin';
   const createRoleOptions = getCreateRoleOptions(currentRole);
 
   const { profilesQuery, roleMutation, nameMutation, deleteMutation, createMutation } = useAdminUserPresenter(canAccessUserManagement);
@@ -58,7 +60,7 @@ export const AdminUserManagement: React.FC = () => {
       return;
     }
 
-    if (!canManageExistingUsers || !canManageTargetRole(currentRole)) {
+    if (!canManageExistingUsers || !canManageTargetRole(currentRole, targetUser.role)) {
       toast.error('You do not have permission to modify this user.');
       return;
     }
@@ -88,8 +90,8 @@ export const AdminUserManagement: React.FC = () => {
   };
 
   const handleNameSave = async (targetUser: Profile) => {
-    if (!canManageExistingUsers) {
-      toast.error('Only superadmin can update user profiles.');
+    if (!canManageExistingUsers || !canManageTargetRole(currentRole, targetUser.role)) {
+      toast.error('You do not have permission to update this user.');
       return;
     }
 
@@ -107,8 +109,8 @@ export const AdminUserManagement: React.FC = () => {
   };
 
   const handleDeleteUser = async (targetUser: Profile) => {
-    if (!canManageExistingUsers) {
-      toast.error('Only superadmin can delete users.');
+    if (!canManageExistingUsers || !canManageTargetRole(currentRole, targetUser.role)) {
+      toast.error('You do not have permission to delete this user.');
       return;
     }
 
@@ -188,14 +190,14 @@ export const AdminUserManagement: React.FC = () => {
       <header>
         <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">User Management</h1>
         <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">
-          Admins can create employee and user accounts. Superadmins can also manage roles and deletions.
+          Superadmins have full control. Admins can create and manage employee and user accounts.
         </p>
       </header>
 
       {currentRole === 'admin' && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <p className="text-sm font-medium">
-            Admin accounts can create new <strong>user</strong> and <strong>employee</strong> accounts only. Role edits and deletions remain superadmin-only.
+            Admin accounts can create, edit, and manage <strong>user</strong> and <strong>employee</strong> accounts. Admin and superadmin accounts are managed by superadmins only.
           </p>
         </div>
       )}
@@ -311,7 +313,7 @@ export const AdminUserManagement: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => startNameEdit(user)}
-                      disabled={!canManageExistingUsers || editingNameUserId === user.id}
+                      disabled={!canManageExistingUsers || !canManageTargetRole(currentRole, user.role) || editingNameUserId === user.id}
                       className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1 text-xs font-bold disabled:opacity-50"
                     >
                       Edit
@@ -321,6 +323,7 @@ export const AdminUserManagement: React.FC = () => {
                       onClick={() => handleDeleteUser(user)}
                       disabled={
                         !canManageExistingUsers ||
+                        !canManageTargetRole(currentRole, user.role) ||
                         user.id === currentUser?.id ||
                         deletingUserId === user.id
                       }
@@ -335,7 +338,7 @@ export const AdminUserManagement: React.FC = () => {
                       disabled={
                         user.id === currentUser?.id ||
                         !canManageExistingUsers ||
-                        !canManageTargetRole(currentRole)
+                        !canManageTargetRole(currentRole, user.role)
                       }
                     >
                       {ROLE_OPTIONS.map((roleOption) => (

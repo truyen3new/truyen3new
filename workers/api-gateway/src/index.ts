@@ -20,8 +20,8 @@ const ALLOWED_ORIGINS = [
 function corsHeaders(origin: string | null) {
   return {
     'Access-Control-Allow-Origin': origin ?? 'null',
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, x-r2-bucket',
     'Access-Control-Expose-Headers': 'x-request-id, x-begin-timestamp',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
@@ -60,7 +60,10 @@ async function handleSupabaseProxy(pathname: string, request: Request, origin: s
   const targetUrl = `${env.SUPABASE_URL}${sbPath}`;
   const headers = new Headers(request.headers);
   headers.set('apikey', env.SUPABASE_ANON_KEY);
-  if (!headers.has('Authorization')) {
+  const authHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
+  if (authHeader) {
+    headers.set('Authorization', authHeader);
+  } else {
     headers.set('Authorization', `Bearer ${env.SUPABASE_ANON_KEY}`);
   }
   headers.delete('x-forwarded-by');
@@ -75,9 +78,20 @@ async function handleSupabaseProxy(pathname: string, request: Request, origin: s
   });
 
   const res = await fetch(upstreamReq);
+  const contentType = res.headers.get('Content-Type') || '';
   const responseHeaders = new Headers(res.headers);
   const c = corsHeaders(origin);
   for (const [k, v] of Object.entries(c)) responseHeaders.set(k, v as string);
+
+  if (contentType.includes('application/json')) {
+    const bodyText = await res.text();
+    let parsed: unknown;
+    try { parsed = JSON.parse(bodyText); } catch { return new Response(bodyText, { status: res.status, headers: responseHeaders }); }
+    const wrapped = res.ok
+      ? { success: true, data: parsed, timestamp: new Date().toISOString() }
+      : { success: false, error: { code: (parsed as any)?.code || 'SUPABASE_ERROR', message: (parsed as any)?.message || res.statusText }, timestamp: new Date().toISOString() };
+    return new Response(JSON.stringify(wrapped), { status: res.ok ? 200 : res.status, headers: responseHeaders });
+  }
 
   return new Response(res.body, { status: res.status, headers: responseHeaders });
 }
@@ -146,6 +160,9 @@ export default {
     const headers = new Headers(request.headers);
     headers.set('x-request-id', crypto.randomUUID());
     headers.set('x-begin-timestamp', String(Date.now()));
+    if (authHeader) {
+      headers.set('Authorization', authHeader);
+    }
     if (authCtx) {
       headers.set('x-user-id', authCtx.userId);
       headers.set('x-user-role', authCtx.role);
@@ -164,6 +181,17 @@ export default {
     const responseHeaders = new Headers(res.headers);
     const c = corsHeaders(origin);
     for (const [k, v] of Object.entries(c)) responseHeaders.set(k, v as string);
+
+    const contentType = res.headers.get('Content-Type') || '';
+    if (contentType.includes('application/json')) {
+      const bodyText = await res.text();
+      let parsed: unknown;
+      try { parsed = JSON.parse(bodyText); } catch { return new Response(bodyText, { status: res.status, headers: responseHeaders }); }
+      const wrapped = res.ok
+        ? { success: true, data: parsed, timestamp: new Date().toISOString() }
+        : { success: false, error: { code: (parsed as any)?.error?.code || 'WORKER_ERROR', message: (parsed as any)?.error?.message || res.statusText }, timestamp: new Date().toISOString() };
+      return new Response(JSON.stringify(wrapped), { status: res.ok ? 200 : res.status, headers: responseHeaders });
+    }
 
     return new Response(res.body, { status: res.status, headers: responseHeaders });
   },

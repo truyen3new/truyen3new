@@ -15,7 +15,7 @@ export const AuthorManagementTab: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editBio, setEditBio] = useState('');
   const { role } = useAuth();
-  const canManageAuthors = role === 'superadmin';
+  const canManageAuthors = role === 'superadmin' || role === 'admin' || role === 'employee';
 
   const { authorsQuery, linkedCounts } = useAuthorPresenter();
 

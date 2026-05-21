@@ -85,10 +85,16 @@ export default {
           author: body.author,
           description: body.description || null,
           cover_url: body.cover_url || null,
-          status: body.status || 'ongoing',
+          status: body.status || 'draft',
         };
         if (body.category) payload.category = Array.isArray(body.category) ? body.category.join(', ') : body.category;
         const res = await sbPost('stories', payload, env, token);
+        return handleRes(res);
+      }
+
+      if (method === 'GET' && path.match(/^\/comics\/[^\/]+\/chapters$/)) {
+        const comicId = path.split('/')[2];
+        const res = await sbGet('chapters', `story_id=eq.${comicId}&select=id,story_id,chapter_number,title,content,view_count,created_at,updated_at&order=chapter_number.asc`, env, token);
         return handleRes(res);
       }
 

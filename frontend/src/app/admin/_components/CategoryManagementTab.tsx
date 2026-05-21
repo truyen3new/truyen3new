@@ -15,7 +15,7 @@ export const CategoryManagementTab: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const { role } = useAuth();
-  const canManageCategories = role === 'superadmin';
+  const canManageCategories = role === 'superadmin' || role === 'admin' || role === 'employee';
 
   const { categoriesQuery, linkedCounts } = useCategoryPresenter();
 

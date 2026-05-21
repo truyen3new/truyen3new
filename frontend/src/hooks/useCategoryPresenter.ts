@@ -13,13 +13,13 @@ export function useCategoryPresenter() {
 
   const linkQuery = useQuery({
     queryKey: ['category-story-links'],
-    queryFn: () => adminService.getStoriesFieldValues('category_id'),
+    queryFn: () => adminService.getStoriesFieldValues('category'),
   });
 
   const linkedCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const row of linkQuery.data ?? []) {
-      const id = (row as any).category_id as string | null;
+      const id = (row as any).category as string | null;
       if (!id) continue;
       counts.set(id, (counts.get(id) ?? 0) + 1);
     }
