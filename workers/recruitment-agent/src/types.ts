@@ -69,4 +69,8 @@ export interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_KEY: string;
   WORKERS_AI_MODEL: string;
+  PIXIV_ACCESS_TOKEN: string;
+  DEVIANTART_ACCESS_TOKEN: string;
+  TWITTER_BEARER_TOKEN: string;
+  BEHANCE_CLIENT_ID: string;
 }
