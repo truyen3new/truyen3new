@@ -62,6 +62,10 @@ export interface AgentState {
   lastCronRun: number;
 }
 
+export interface Ai {
+  run: (model: string, options: { messages: any[] }) => Promise<any>;
+}
+
 export interface Env {
   RecruitmentAgent: DurableObjectNamespace;
   AI: Ai;
