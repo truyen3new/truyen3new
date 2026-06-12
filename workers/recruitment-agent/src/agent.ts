@@ -23,6 +23,82 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
     console.log(`[RecruitmentAgent ${state.adminId}] state updated`);
   }
 
+  async onRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const method = request.method;
+
+    if (path.endsWith("/dashboard") || path.endsWith("/dashboard/")) {
+      return new Response(JSON.stringify(this.state), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (path.endsWith("/candidates")) {
+      if (method === "GET") {
+        return new Response(JSON.stringify({
+          pending: this.state.pendingCandidates,
+          evaluated: this.state.evaluatedCandidates,
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (method === "POST") {
+        try {
+          const body = await request.json() as any;
+          if (body.url && body.platform) {
+            const candidate = await this.addManualUrl(body.url, body.platform);
+            return new Response(JSON.stringify(candidate), {
+              status: 201,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+        } catch { /* fall through */ }
+      }
+    }
+
+    if (path.includes("/scout") && method === "POST") {
+      try {
+        const body = await request.json() as any;
+        if (body.platform && body.query) {
+          return new Response(JSON.stringify({ ok: true, message: "Scout triggered", platform: body.platform, query: body.query }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      } catch { /* fall through */ }
+    }
+
+    if (path.includes("/evaluate") && method === "POST") {
+      try {
+        const body = await request.json() as any;
+        if (body.candidateId) {
+          this.queueEvaluation(body.candidateId);
+          return new Response(JSON.stringify({ ok: true, message: "Evaluation queued" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      } catch { /* fall through */ }
+    }
+
+    return new Response(JSON.stringify({ error: "Not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  async alarm(): Promise<void> {
+    console.log(`[RecruitmentAgent ${this.state.adminId}] alarm triggered`);
+
+    for (const session of this.state.scoutSessions) {
+      if (session.status === "idle") {
+        this.queue("scout" as keyof this, session.source);
+      }
+    }
+
+    this.setState({ ...this.state, lastCronRun: Date.now() });
+
+    await this.schedule(21600, "alarm", undefined, { idempotent: true });
+  }
+
   @callable()
   async initialize(adminId: string): Promise<AgentState> {
     if (!this.state.adminId) {
@@ -143,9 +219,12 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
     });
   }
 
-  private evaluate(candidateId: string): void {
-    // Evaluated via submitEvaluation after AI processing
-    // This method exists as the queue callback target
+  async evaluate(candidateId: string): Promise<void> {
+    console.log(`[RecruitmentAgent ${this.state.adminId}] evaluation queued for ${candidateId}`);
+  }
+
+  async scout(platform: SourcePlatform): Promise<void> {
+    console.log(`[RecruitmentAgent ${this.state.adminId}] scout triggered for ${platform}`);
   }
 
   private findCandidate(candidateId: string): Candidate | undefined {
