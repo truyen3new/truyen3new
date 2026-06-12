@@ -6,14 +6,6 @@ export interface ScoutResult {
   error?: string;
 }
 
-interface PlatformSearchResult {
-  creatorName: string;
-  creatorHandle?: string;
-  avatarUrl?: string;
-  sourceUrl: string;
-  followerCount: number;
-}
-
 export class ScoutScheduler {
   private env: Env;
 
@@ -83,8 +75,8 @@ export class ScoutScheduler {
     const token = this.env.DEVIANTART_ACCESS_TOKEN;
     if (!token) return { platform: "deviantart", candidates: [], error: "No DeviantArt access token configured" };
 
-    const url = `https://www.deviantart.com/api/v1/oauth2/search/${encodeURIComponent(query)}?access_token=${token}&limit=20`;
-    const res = await fetch(url);
+    const url = `https://www.deviantart.com/api/v1/oauth2/search/${encodeURIComponent(query)}?limit=20`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return { platform: "deviantart", candidates: [], error: `DeviantArt API error: ${res.status}` };
 
     const data: any = await res.json();

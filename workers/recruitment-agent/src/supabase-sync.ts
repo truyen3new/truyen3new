@@ -1,14 +1,11 @@
 import type { Candidate, Decision, Invite, AgentState, Env } from "./types";
 
-interface SupabaseResponse {
-  data?: any;
-  error?: { message: string };
-}
-
 export class SupabaseSync {
   private env: Env;
   private readonly baseUrl: string;
   private readonly headers: Record<string, string>;
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingState: AgentState | null = null;
 
   constructor(env: Env) {
     this.env = env;
@@ -19,6 +16,20 @@ export class SupabaseSync {
       "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
       "Prefer": "return=minimal",
     };
+  }
+
+  /** Debounced sync: coalesces rapid state changes into a single sync call */
+  scheduleSync(state: AgentState): void {
+    this.pendingState = state;
+    if (this.syncTimer) return;
+    this.syncTimer = setTimeout(() => {
+      this.syncTimer = null;
+      if (this.pendingState) {
+        const state = this.pendingState;
+        this.pendingState = null;
+        this.syncAll(state);
+      }
+    }, 100);
   }
 
   async syncCandidate(candidate: Candidate): Promise<void> {

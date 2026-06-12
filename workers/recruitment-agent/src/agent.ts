@@ -2,8 +2,14 @@ import { Agent, callable } from "agents";
 import type { Connection } from "agents";
 import type { AgentState, Candidate, ScoutSession, Decision, Invite, Evaluation, SourcePlatform, Env } from "./types";
 import { SupabaseSync } from "./supabase-sync";
+import { ScoutScheduler } from "./scout";
+import { CreatorEvaluator } from "./evaluator";
 
 export class RecruitmentAgent extends Agent<Env, AgentState> {
+  private dbSync = new SupabaseSync(this.env);
+  private scoutScheduler = new ScoutScheduler(this.env);
+  private evaluator = new CreatorEvaluator(this.env);
+
   initialState: AgentState = {
     adminId: "",
     scoutSessions: [],
@@ -22,8 +28,7 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
 
   onStateUpdate(state: AgentState, source: Connection | "server") {
     console.log(`[RecruitmentAgent ${state.adminId}] state updated`);
-    const sync = new SupabaseSync(this.env);
-    sync.syncAll(state);
+    this.dbSync.scheduleSync(state);
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -31,13 +36,17 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
     const path = url.pathname;
     const method = request.method;
 
-    if (path.endsWith("/dashboard") || path.endsWith("/dashboard/")) {
+    // Extract relative path by stripping /api/recruitment/admin/{adminId} prefix
+    const prefix = `/api/recruitment/admin/${this.state.adminId}`;
+    const relativePath = path.startsWith(prefix) ? path.slice(prefix.length) || "/" : path;
+
+    if (relativePath === "/dashboard") {
       return new Response(JSON.stringify(this.state), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    if (path.endsWith("/candidates")) {
+    if (relativePath === "/candidates") {
       if (method === "GET") {
         return new Response(JSON.stringify({
           pending: this.state.pendingCandidates,
@@ -59,7 +68,7 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
       }
     }
 
-    if (path.includes("/scout") && method === "POST") {
+    if (relativePath === "/scout" && method === "POST") {
       try {
         const body = await request.json() as any;
         if (body.platform && body.query) {
@@ -70,7 +79,7 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
       } catch { /* fall through */ }
     }
 
-    if (path.includes("/evaluate") && method === "POST") {
+    if (relativePath === "/evaluate" && method === "POST") {
       try {
         const body = await request.json() as any;
         if (body.candidateId) {
@@ -223,11 +232,41 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
   }
 
   async evaluate(candidateId: string): Promise<void> {
-    console.log(`[RecruitmentAgent ${this.state.adminId}] evaluation queued for ${candidateId}`);
+    const candidate = this.findCandidate(candidateId);
+    if (!candidate) {
+      console.error(`[RecruitmentAgent ${this.state.adminId}] candidate ${candidateId} not found for evaluation`);
+      return;
+    }
+
+    const evaluation = await this.evaluator.evaluate(candidate);
+    await this.submitEvaluation(candidateId, evaluation);
   }
 
   async scout(platform: SourcePlatform): Promise<void> {
-    console.log(`[RecruitmentAgent ${this.state.adminId}] scout triggered for ${platform}`);
+    const sessionIndex = this.state.scoutSessions.findIndex((s) => s.source === platform);
+    if (sessionIndex === -1) return;
+
+    // Mark session as running
+    const runningSessions = this.state.scoutSessions.map((s, i) =>
+      i === sessionIndex ? { ...s, status: "running" as const, lastRunAt: Date.now() } : s
+    );
+    this.setState({ ...this.state, scoutSessions: runningSessions });
+
+    // Execute search
+    const result = await this.scoutScheduler.search(platform, "manga comic art");
+
+    // Update with results
+    const updatedSessions = this.state.scoutSessions.map((s, i) =>
+      i === sessionIndex
+        ? { ...s, status: (result.error ? "error" : "idle") as "idle" | "error", candidatesFound: s.candidatesFound + result.candidates.length, error: result.error }
+        : s
+    );
+
+    this.setState({
+      ...this.state,
+      pendingCandidates: [...this.state.pendingCandidates, ...result.candidates],
+      scoutSessions: updatedSessions,
+    });
   }
 
   private findCandidate(candidateId: string): Candidate | undefined {

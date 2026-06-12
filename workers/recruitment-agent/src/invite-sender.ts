@@ -19,9 +19,13 @@ export class InviteSender {
       const inviteUrl = `https://lightstory.com/recruitment/invite/${inviteCode}`;
       const recipientName = candidate.creatorName || candidate.creatorHandle || "Creator";
 
+      if (!candidate.creatorHandle && !candidate.creatorName) {
+        return { success: false, error: "No email or contact info available for this candidate" };
+      }
+
       await this.env.SEND_EMAIL_BINDING.send({
         from: { name: this.FROM_NAME, email: this.FROM_EMAIL },
-        to: [{ name: recipientName, email: candidate.creatorHandle ? `${candidate.creatorHandle}@placeholder.com` : "" }],
+        to: [{ name: recipientName, email: `${candidate.creatorHandle}@placeholder.com` }],
         subject: `You're Invited! Join Light Story as a Creator`,
         html: this.buildHtmlTemplate(recipientName, inviteUrl),
         text: this.buildTextTemplate(recipientName, inviteUrl),

@@ -24,7 +24,7 @@ export default {
       });
     }
 
-    const adminMatch = path.match(/^\/api\/recruitment\/admin\/([a-f0-9-]+)(\/.*)?$/);
+    const adminMatch = path.match(/^\/api\/recruitment\/admin\/([a-fA-F0-9-]+)(\/.*)?$/);
     if (!adminMatch) {
       return new Response(JSON.stringify({ error: "Not found" }), {
         status: 404,
