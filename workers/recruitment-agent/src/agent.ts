@@ -1,6 +1,7 @@
 import { Agent, callable } from "agents";
 import type { Connection } from "agents";
 import type { AgentState, Candidate, ScoutSession, Decision, Invite, Evaluation, SourcePlatform, Env } from "./types";
+import { SupabaseSync } from "./supabase-sync";
 
 export class RecruitmentAgent extends Agent<Env, AgentState> {
   initialState: AgentState = {
@@ -21,6 +22,8 @@ export class RecruitmentAgent extends Agent<Env, AgentState> {
 
   onStateUpdate(state: AgentState, source: Connection | "server") {
     console.log(`[RecruitmentAgent ${state.adminId}] state updated`);
+    const sync = new SupabaseSync(this.env);
+    sync.syncAll(state);
   }
 
   async onRequest(request: Request): Promise<Response> {
