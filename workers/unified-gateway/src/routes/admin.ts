@@ -622,6 +622,107 @@ export async function handleAdminRequest(
         : handleRes(res);
     }
 
+    // ── Comic CMS CRUD ─────────────────────────────────────
+
+    if (method === 'POST' && path === '/admin/upload-to-r2') {
+      const bucket = env.R2_BUCKET;
+      if (!bucket) {
+        return err('R2_NOT_CONFIGURED', 'R2 bucket not bound', 500);
+      }
+      const contentType = request.headers.get('Content-Type') || '';
+      if (!contentType.includes('multipart/form-data')) {
+        return err('BAD_REQUEST', 'Expected multipart/form-data', 400);
+      }
+      const formData = await request.formData();
+      const fileEntries = formData.getAll('file') as File[];
+      if (fileEntries.length === 0) {
+        return err('BAD_REQUEST', 'No files provided', 400);
+      }
+      const uploadedUrls: string[] = [];
+      for (const file of fileEntries) {
+        const ext = file.name.split('.').pop() || 'png';
+        const key = `uploads/${crypto.randomUUID()}.${ext}`;
+        await bucket.put(key, await file.arrayBuffer(), {
+          httpMetadata: { contentType: file.type || 'application/octet-stream' },
+        });
+        uploadedUrls.push(`/api/admin/r2/${key}`);
+      }
+      return json({ success: true, data: { urls: uploadedUrls } });
+    }
+
+    if (method === 'POST' && path === '/admin/comics') {
+      const body = (await request.json()) as any;
+      const payload: Record<string, unknown> = {
+        title: body.title,
+        author: body.author || 'Unknown',
+        description: body.description || null,
+        status: body.status || 'draft',
+      };
+      const metadata: Record<string, unknown> = {};
+      if (body.slug) metadata.slug = body.slug;
+      if (body.genres) metadata.genres = body.genres;
+      if (body.tags) metadata.tags = body.tags;
+      if (Object.keys(metadata).length > 0) {
+        payload.metadata = JSON.stringify(metadata);
+      }
+      const res = await sbPost('stories', payload, env, token);
+      return handleRes(res);
+    }
+
+    if (method === 'GET' && path === '/admin/comics') {
+      const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
+      const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get('pageSize') || '50')));
+      const offset = (page - 1) * pageSize;
+      const q = `select=*&order=created_at.desc&limit=${pageSize}&offset=${offset}`;
+      const res = await sbGet('stories', q, env, token);
+      return handleRes(res);
+    }
+
+    if (method === 'GET' && path.match(/^\/admin\/comics\/[^\/]+$/)) {
+      const id = path.split('/')[3];
+      const res = await sbGet('stories', `id=eq.${id}&select=*`, env, token);
+      return handleRes(res);
+    }
+
+    if (method === 'PATCH' && path.match(/^\/admin\/comics\/[^\/]+$/)) {
+      const id = path.split('/')[3];
+      const body = (await request.json()) as any;
+      const payload: Record<string, unknown> = {};
+      if (body.title !== undefined) payload.title = body.title;
+      if (body.author !== undefined) payload.author = body.author;
+      if (body.description !== undefined) payload.description = body.description;
+      if (body.status !== undefined) payload.status = body.status;
+      if (body.coverUrl !== undefined) payload.cover_url = body.coverUrl;
+      const metadata: Record<string, unknown> = {};
+      if (body.genres) metadata.genres = body.genres;
+      if (body.tags) metadata.tags = body.tags;
+      if (body.slug) metadata.slug = body.slug;
+      if (Object.keys(metadata).length > 0) {
+        payload.metadata = JSON.stringify(metadata);
+      }
+      const res = await sbPatch('stories', `id=eq.${id}`, payload, env, token);
+      return handleRes(res);
+    }
+
+    if (method === 'DELETE' && path.match(/^\/admin\/comics\/[^\/]+$/)) {
+      const id = path.split('/')[3];
+      const res = await sbDelete('stories', `id=eq.${id}`, env, token);
+      return res.ok ? json({ success: true }) : handleRes(res);
+    }
+
+    if (method === 'POST' && path.match(/^\/admin\/comics\/[^\/]+\/chapters$/)) {
+      const comicId = path.split('/')[3];
+      const body = (await request.json()) as any;
+      const payload = {
+        story_id: body.comicId || comicId,
+        chapter_number: body.chapterNumber || 1,
+        title: body.title || `Chapter ${body.chapterNumber}`,
+        content: JSON.stringify(body.pageUrls || []),
+      };
+      const res = await sbPost('chapters', payload, env, token);
+      return handleRes(res);
+    }
+
     return null;
   } catch (e: any) {
     return err(
