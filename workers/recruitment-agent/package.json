@@ -7,16 +7,17 @@
     "dev": "wrangler dev",
     "build": "wrangler build",
     "deploy": "wrangler deploy",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
-    "agents": "^0.14.0",
-    "@cloudflare/ai-chat": "^0.8.0"
+    "@cloudflare/ai-chat": "^0.8.0",
+    "agents": "^0.14.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
     "typescript": "^5.0.0",
-    "wrangler": "^4.92.0",
     "vitest": "^3.0.0",
-    "@cloudflare/workers-types": "^4.0.0"
+    "wrangler": "^4.92.0"
   }
 }
