@@ -36,32 +36,29 @@ ALTER TABLE public.stories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chapters ENABLE ROW LEVEL SECURITY;
 
 -- 5) RLS policies
--- published stories readable
-CREATE POLICY IF NOT EXISTS read_published_stories
-  ON public.stories FOR SELECT
-  USING (status = 'published');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='stories' AND policyname='read_published_stories') THEN
+    CREATE POLICY read_published_stories ON public.stories FOR SELECT USING (status = 'published');
+  END IF;
+END $$;
 
--- free chapters: readable when not VIP and story is published
-CREATE POLICY IF NOT EXISTS read_free_chapters
-  ON public.chapters FOR SELECT
-  USING (
-    vip_content = FALSE
-    AND EXISTS (
-      SELECT 1 FROM public.stories s
-      WHERE s.id = public.chapters.story_id AND s.status = 'published'
-    )
-  );
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='chapters' AND policyname='read_free_chapters') THEN
+    CREATE POLICY read_free_chapters ON public.chapters FOR SELECT USING (
+      vip_content = FALSE
+      AND EXISTS (SELECT 1 FROM public.stories s WHERE s.id = public.chapters.story_id AND s.status = 'published')
+    );
+  END IF;
+END $$;
 
--- vip chapters: only readable to premium or admin profiles
-CREATE POLICY IF NOT EXISTS read_vip_chapters_premium_admin
-  ON public.chapters FOR SELECT
-  USING (
-    vip_content = TRUE
-    AND EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('premium', 'admin', 'superadmin')
-    )
-  );
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='chapters' AND policyname='read_vip_chapters_premium_admin') THEN
+    CREATE POLICY read_vip_chapters_premium_admin ON public.chapters FOR SELECT USING (
+      vip_content = TRUE
+      AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN ('premium', 'admin', 'superadmin'))
+    );
+  END IF;
+END $$;
 
 -- 6) pgvector index (recommended for similarity search)
 -- Use ivfflat index; tune 'lists' based on dataset size and performance testing

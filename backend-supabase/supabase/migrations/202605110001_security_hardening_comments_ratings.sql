@@ -17,38 +17,62 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
 $$;
 
 -- Comments RLS: only allow SELECT on published content and allow INSERT by authenticated users
-CREATE POLICY IF NOT EXISTS comments_select_published ON public.comments FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM public.stories s WHERE s.id = public.comments.story_id AND s.status = 'published'
-  )
-);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='comments' AND policyname='comments_select_published') THEN
+    CREATE POLICY comments_select_published ON public.comments FOR SELECT
+    USING (EXISTS (SELECT 1 FROM public.stories s WHERE s.id = public.comments.story_id AND s.status = 'published'));
+  END IF;
+END $$;
 
-CREATE POLICY IF NOT EXISTS comments_insert_auth ON public.comments FOR INSERT
-  WITH CHECK (auth.uid() IS NOT NULL);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='comments' AND policyname='comments_insert_auth') THEN
+    CREATE POLICY comments_insert_auth ON public.comments FOR INSERT
+    WITH CHECK (auth.uid() IS NOT NULL);
+  END IF;
+END $$;
 
-CREATE POLICY IF NOT EXISTS comments_update_owner_or_admin ON public.comments FOR UPDATE
-  USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='comments' AND policyname='comments_update_owner_or_admin') THEN
+    CREATE POLICY comments_update_owner_or_admin ON public.comments FOR UPDATE
+    USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+  END IF;
+END $$;
 
-CREATE POLICY IF NOT EXISTS comments_delete_owner_or_admin ON public.comments FOR DELETE
-  USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='comments' AND policyname='comments_delete_owner_or_admin') THEN
+    CREATE POLICY comments_delete_owner_or_admin ON public.comments FOR DELETE
+    USING (author_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+  END IF;
+END $$;
 
 -- Ratings RLS: allow read on published stories; inserts require auth; updates/deletes owner or admin
-CREATE POLICY IF NOT EXISTS ratings_select_published ON public.ratings FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM public.stories s WHERE s.id = public.ratings.story_id AND s.status = 'published'
-  )
-);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='ratings' AND policyname='ratings_select_published') THEN
+    CREATE POLICY ratings_select_published ON public.ratings FOR SELECT
+    USING (EXISTS (SELECT 1 FROM public.stories s WHERE s.id = public.ratings.story_id AND s.status = 'published'));
+  END IF;
+END $$;
 
-CREATE POLICY IF NOT EXISTS ratings_insert_auth ON public.ratings FOR INSERT
-  WITH CHECK (auth.uid() IS NOT NULL);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='ratings' AND policyname='ratings_insert_auth') THEN
+    CREATE POLICY ratings_insert_auth ON public.ratings FOR INSERT
+    WITH CHECK (auth.uid() IS NOT NULL);
+  END IF;
+END $$;
 
-CREATE POLICY IF NOT EXISTS ratings_update_owner_or_admin ON public.ratings FOR UPDATE
-  USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='ratings' AND policyname='ratings_update_owner_or_admin') THEN
+    CREATE POLICY ratings_update_owner_or_admin ON public.ratings FOR UPDATE
+    USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+  END IF;
+END $$;
 
-CREATE POLICY IF NOT EXISTS ratings_delete_owner_or_admin ON public.ratings FOR DELETE
-  USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='ratings' AND policyname='ratings_delete_owner_or_admin') THEN
+    CREATE POLICY ratings_delete_owner_or_admin ON public.ratings FOR DELETE
+    USING (user_id = auth.uid() OR public.user_has_role(auth.uid(), 'admin') OR public.user_has_role(auth.uid(), 'superadmin'));
+  END IF;
+END $$;
 
 -- IDOR protection: explicit function to validate chapter access by id
 CREATE OR REPLACE FUNCTION public.can_read_chapter(_chapter_id uuid, _uid uuid)
