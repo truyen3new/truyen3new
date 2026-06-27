@@ -30,7 +30,8 @@ as $$
 $$;
 
 -- Replaces get_top_chapters_by_reads to add favorite_count
-create or replace function public.get_top_chapters_by_reads(
+drop function if exists public.get_top_chapters_by_reads cascade;
+create function public.get_top_chapters_by_reads(
   p_limit integer default 10,
   p_time_range text default '7d'
 )
