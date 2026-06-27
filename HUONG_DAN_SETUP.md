@@ -42,21 +42,19 @@ Sửa `workers/unified-gateway/.dev.vars` với giá trị thật.
 
 ## 4. Chạy Local
 
-Terminal 1 — Gateway Worker:
+Terminal 1 — Gateway Worker (port 8787):
 
 ```bash
-cd workers/unified-gateway
-npx wrangler dev
+npm run dev:gateway
 ```
 
-Terminal 2 — Frontend:
+Terminal 2 — Frontend (port 3001):
 
 ```bash
-cd frontend
 npm run dev
 ```
 
-Mở `http://localhost:3000`.
+Mở `http://localhost:3001`.
 
 ## 5. Deploy Worker Lên Cloudflare
 
@@ -97,11 +95,7 @@ npx vitest run --config vitest.integration.config.ts
 
 ```
 workers/
-  unified-gateway/    — API Gateway (auth, route đến Supabase)
-  stories-worker/     — Story/chapter CRUD
-  comics-worker/      — Comic CMS
-  admin-worker/       — Admin operations
-  analytics-worker/   — Dashboard analytics
+  unified-gateway/    — API Gateway duy nhất (auth, route đến Supabase, xử lý stories/chapters/admin/analytics)
   r2-signed-url/      — Proxy R2 assets (repo riêng: cloudR2-woker)
 
 frontend/src/
@@ -109,6 +103,8 @@ frontend/src/
   infrastructure/     — Supabase client
   app/                — Next.js App Router pages
 ```
+
+> **Lưu ý:** Các worker `stories-worker`, `comics-worker`, `admin-worker`, `analytics-worker` cũ đã được gộp vào `unified-gateway`.
 
 ## 9. Liên Hệ
 

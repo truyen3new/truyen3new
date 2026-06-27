@@ -5,6 +5,7 @@ import type { Env } from '../utils/supabase-client';
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:3001',
+  'http://127.0.0.1:3001',
   'https://lightstory.app',
   'https://staging.lightstory.app',
 ];

@@ -20,8 +20,8 @@ function err(code: string, message: string, status: number): Response {
   return json({ status: 'error', error: { code, message } }, status);
 }
 
-function authToken(req: Request): string | null {
-  const a = req.headers.get('Authorization');
+function authToken(h: Headers): string | null {
+  const a = h.get('Authorization');
   if (a?.startsWith('Bearer ')) return a.slice(7);
   return null;
 }
