@@ -1,19 +1,5 @@
 -- Harden analytics RPCs: require authenticated staff roles and remove PUBLIC execute.
 
-revoke all on function public.get_user_engagement_summary(text, timestamptz, timestamptz) from public;
-revoke all on function public.get_signup_trend(integer) from public;
-revoke all on function public.get_inactive_user_cohort(integer) from public;
-revoke all on function public.get_top_stories_by_metric(text, integer, text) from public;
-revoke all on function public.get_top_chapters_by_reads(integer, text) from public;
-revoke all on function public.get_story_completion_rates(uuid) from public;
-
-grant execute on function public.get_user_engagement_summary(text, timestamptz, timestamptz) to authenticated;
-grant execute on function public.get_signup_trend(integer) to authenticated;
-grant execute on function public.get_inactive_user_cohort(integer) to authenticated;
-grant execute on function public.get_top_stories_by_metric(text, integer, text) to authenticated;
-grant execute on function public.get_top_chapters_by_reads(integer, text) to authenticated;
-grant execute on function public.get_story_completion_rates(uuid) to authenticated;
-
 create or replace function public.get_user_engagement_summary(
   p_time_range text default '24h',
   p_start_date timestamptz default null,
@@ -112,7 +98,8 @@ begin
 end;
 $$;
 
-create or replace function public.get_signup_trend(
+drop function if exists public.get_signup_trend cascade;
+create function public.get_signup_trend(
   p_days_back integer default 30
 )
 returns table (
@@ -141,7 +128,8 @@ begin
 end;
 $$;
 
-create or replace function public.get_inactive_user_cohort(
+drop function if exists public.get_inactive_user_cohort cascade;
+create function public.get_inactive_user_cohort(
   p_inactive_days integer default 7
 )
 returns table (
@@ -177,7 +165,8 @@ begin
 end;
 $$;
 
-create or replace function public.get_top_stories_by_metric(
+drop function if exists public.get_top_stories_by_metric cascade;
+create function public.get_top_stories_by_metric(
   p_metric text default 'views',
   p_limit integer default 10,
   p_time_range text default '7d'
@@ -250,7 +239,8 @@ begin
 end;
 $$;
 
-create or replace function public.get_top_chapters_by_reads(
+drop function if exists public.get_top_chapters_by_reads cascade;
+create function public.get_top_chapters_by_reads(
   p_limit integer default 10,
   p_time_range text default '7d'
 )
@@ -308,7 +298,8 @@ begin
 end;
 $$;
 
-create or replace function public.get_story_completion_rates(
+drop function if exists public.get_story_completion_rates cascade;
+create function public.get_story_completion_rates(
   p_story_id uuid default null
 )
 returns table (
@@ -340,3 +331,17 @@ begin
   order by completion_rate desc;
 end;
 $$;
+
+revoke all on function public.get_user_engagement_summary(text, timestamptz, timestamptz) from public;
+revoke all on function public.get_signup_trend(integer) from public;
+revoke all on function public.get_inactive_user_cohort(integer) from public;
+revoke all on function public.get_top_stories_by_metric(text, integer, text) from public;
+revoke all on function public.get_top_chapters_by_reads(integer, text) from public;
+revoke all on function public.get_story_completion_rates(uuid) from public;
+
+grant execute on function public.get_user_engagement_summary(text, timestamptz, timestamptz) to authenticated;
+grant execute on function public.get_signup_trend(integer) to authenticated;
+grant execute on function public.get_inactive_user_cohort(integer) to authenticated;
+grant execute on function public.get_top_stories_by_metric(text, integer, text) to authenticated;
+grant execute on function public.get_top_chapters_by_reads(integer, text) to authenticated;
+grant execute on function public.get_story_completion_rates(uuid) to authenticated;

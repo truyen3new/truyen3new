@@ -53,27 +53,27 @@ alter table public.recruitment_invites enable row level security;
 
 create policy "superadmin_full_access_recruitment_candidates"
   on public.recruitment_candidates for all
-  using (public.has_role(auth.uid(), 'superadmin'::public.user_role))
-  with check (public.has_role(auth.uid(), 'superadmin'::public.user_role));
+  using (public.user_has_role(auth.uid(), 'superadmin'))
+  with check (public.user_has_role(auth.uid(), 'superadmin'));
 
 create policy "admin_read_recruitment_candidates"
   on public.recruitment_candidates for select
-  using (public.has_role(auth.uid(), 'admin'::public.user_role));
+  using (public.user_has_role(auth.uid(), 'admin'));
 
 create policy "superadmin_full_access_recruitment_decisions"
   on public.recruitment_decisions for all
-  using (public.has_role(auth.uid(), 'superadmin'::public.user_role))
-  with check (public.has_role(auth.uid(), 'superadmin'::public.user_role));
+  using (public.user_has_role(auth.uid(), 'superadmin'))
+  with check (public.user_has_role(auth.uid(), 'superadmin'));
 
 create policy "admin_read_recruitment_decisions"
   on public.recruitment_decisions for select
-  using (public.has_role(auth.uid(), 'admin'::public.user_role));
+  using (public.user_has_role(auth.uid(), 'admin'));
 
 create policy "superadmin_full_access_recruitment_invites"
   on public.recruitment_invites for all
-  using (public.has_role(auth.uid(), 'superadmin'::public.user_role))
-  with check (public.has_role(auth.uid(), 'superadmin'::public.user_role));
+  using (public.user_has_role(auth.uid(), 'superadmin'))
+  with check (public.user_has_role(auth.uid(), 'superadmin'));
 
 create policy "admin_read_recruitment_invites"
   on public.recruitment_invites for select
-  using (public.has_role(auth.uid(), 'admin'::public.user_role));
+  using (public.user_has_role(auth.uid(), 'admin'));
