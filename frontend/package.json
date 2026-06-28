@@ -24,10 +24,10 @@
     "env:use-emulator": "node ./scripts/use_emulator.mjs"
   },
   "dependencies": {
-    "@light-story/api-types": "file:../packages/api-types",
     "@aws-sdk/client-s3": "^3.1044.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@google/genai": "^1.52.0",
+    "@light-story/api-types": "file:../packages/api-types",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
     "@tanstack/react-query": "^5.100.10",
@@ -38,7 +38,7 @@
     "express": "^5.2.1",
     "lucide-react": "^1.16.0",
     "motion": "^12.23.24",
-    "next": "^16.2.6",
+    "next": "^15.3.0",
     "radix-ui": "^1.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.2.6",
