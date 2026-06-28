@@ -25,7 +25,7 @@ type ComicChaptersTabProps = {
   onResetPages: () => void;
 };
 
-export default function ComicChaptersTab({
+export function ComicChaptersTab({
   selectedComic,
   selectedChapters,
   chapterValues,

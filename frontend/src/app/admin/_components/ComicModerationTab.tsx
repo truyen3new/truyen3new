@@ -16,7 +16,7 @@ type ComicModerationTabProps = {
   onModerationAction: (commentId: string, status: ComicReportedComment["status"]) => void;
 };
 
-export default function ComicModerationTab({
+export function ComicModerationTab({
   moderation,
   canModerate,
   moderationBusy,
@@ -72,7 +72,7 @@ export default function ComicModerationTab({
               <Ban size={14} /> Profanity filter
             </div>
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Keywords are stored locally for the demo admin workflow and audited whenever they change.
+              Keywords are persisted to storage and audited on change.
             </p>
             <div className="flex flex-wrap gap-2">
               {moderation.keywords.length === 0 ? (
