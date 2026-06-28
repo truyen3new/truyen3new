@@ -227,6 +227,7 @@ export async function createComicFromMetadata(
       author: record.author,
       description: record.description,
       status: record.status,
+      coverUrl: record.coverUrl || undefined,
       genres: record.genres,
       tags: record.tags,
     });
