@@ -7,7 +7,6 @@ import {
   type TabKey,
   formatDateTime,
   statusTone,
-  uniqueTokens,
 } from "@/lib/cms/comicCmsTypes";
 import type { ComicStatus } from "@/lib/validation/comicCmsSchemas";
 
@@ -50,13 +49,11 @@ export function ComicCatalogTab({
             const q = filters.search.toLowerCase();
             if (
               !record.title.toLowerCase().includes(q) &&
-              !record.author.toLowerCase().includes(q) &&
-              !record.slug.toLowerCase().includes(q)
+              !record.author.toLowerCase().includes(q)
             ) {
               return false;
             }
           }
-          if (filters.genre && !record.genres.includes(filters.genre)) return false;
           if (filters.status !== "all" && record.status !== filters.status) return false;
           if (filters.author && record.author !== filters.author) return false;
           return true;
@@ -65,13 +62,8 @@ export function ComicCatalogTab({
     [catalog, filters],
   );
 
-  const genreOptions = React.useMemo(
-    () => uniqueTokens(catalog.flatMap((record) => record.genres)).sort((left, right) => left.localeCompare(right)),
-    [catalog],
-  );
-
   const authorOptions = React.useMemo(
-    () => uniqueTokens(catalog.map((record) => record.author)).sort((left, right) => left.localeCompare(right)),
+    () => [...new Set(catalog.map((record) => record.author).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [catalog],
   );
 
@@ -104,7 +96,7 @@ export function ComicCatalogTab({
         </div>
       </div>
       <div className="p-5 space-y-5">
-        <div className="grid gap-3 lg:grid-cols-4">
+        <div className="grid gap-3 lg:grid-cols-3">
           <label className="flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3">
             <Search size={16} className="text-slate-400" />
             <input
@@ -118,29 +110,15 @@ export function ComicCatalogTab({
             <Filter size={16} className="text-slate-400" />
             <select
               value={filters.status}
-              onChange={(event) => onFiltersChange({ ...filters, status: event.target.value as ComicCatalogFilters["status"] })}
+              onChange={(event) => onFiltersChange({ ...filters, status: event.target.value })}
               className="w-full bg-transparent text-sm font-semibold text-slate-900 dark:text-white focus:outline-none"
             >
               <option value="all">All statuses</option>
               <option value="draft">Draft</option>
-              <option value="pending">Pending</option>
               <option value="published">Published</option>
+              <option value="ongoing">Ongoing</option>
+              <option value="completed">Completed</option>
               <option value="archived">Archived</option>
-            </select>
-          </label>
-          <label className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3">
-            <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Genre</div>
-            <select
-              value={filters.genre}
-              onChange={(event) => onFiltersChange({ ...filters, genre: event.target.value })}
-              className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 dark:text-white focus:outline-none"
-            >
-              <option value="">All genres</option>
-              {genreOptions.map((genre) => (
-                <option key={genre} value={genre}>
-                  {genre}
-                </option>
-              ))}
             </select>
           </label>
           <label className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3">
@@ -190,7 +168,7 @@ export function ComicCatalogTab({
                           <StatusBadge status={comic.status} />
                         </div>
                         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                          {comic.author} · {comic.slug}
+                          {comic.author}
                         </p>
                         <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
                           {comic.description || "No description provided."}
@@ -219,7 +197,7 @@ export function ComicCatalogTab({
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Selected</div>
                 <div className="mt-1 text-sm font-bold text-slate-900 dark:text-white">
-                  {selectedComic ? `${selectedComic.title} · ${selectedComic.slug}` : "New comic draft"}
+                  {selectedComic?.title ?? "New comic draft"}
                 </div>
               </div>
               <StatusBadge status={selectedComic?.status ?? "draft"} />

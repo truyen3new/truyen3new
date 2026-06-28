@@ -1,10 +1,6 @@
 /** Lightweight body validation for route handlers */
 
-export const VALID_STATUSES = ['draft', 'ongoing', 'completed', 'archived'] as const;
-const FRONTEND_STATUS_MAP: Record<string, string> = {
-  published: 'ongoing',
-  pending: 'draft',
-};
+export const VALID_STATUSES = ['draft', 'published', 'ongoing', 'completed', 'archived'] as const;
 
 export interface ValidationError {
   field: string;
@@ -27,7 +23,6 @@ function validateString(value: unknown, maxLength = 500): string | null {
 
 function normalizeStatus(status: string): string {
   if (VALID_STATUSES.includes(status as any)) return status;
-  if (FRONTEND_STATUS_MAP[status]) return FRONTEND_STATUS_MAP[status];
   return 'draft';
 }
 

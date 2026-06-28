@@ -5,11 +5,12 @@ import {
   AlertTriangle, BookOpen, ChevronDown, ChevronUp,
   FileImage, GripVertical, Trash2, Upload,
 } from "lucide-react";
-import { formatBytes, formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput, type PageDraft } from "@/lib/cms/comicCmsTypes";
-import type { ComicChapterFormValues, ComicStatus } from "@/lib/validation/comicCmsSchemas";
+import { formatBytes, formatDateTime, type PageDraft } from "@/lib/cms/comicCmsTypes";
+import type { ComicChapterFormValues } from "@/lib/validation/comicCmsSchemas";
 import type { ComicCmsRecord } from "@/services/comicCms.service";
 
 type ComicChaptersTabProps = {
+  catalog: ComicCmsRecord[];
   selectedComic: ComicCmsRecord | null;
   selectedChapters: ComicCmsRecord["chapters"];
   chapterValues: ComicChapterFormValues;
@@ -23,9 +24,11 @@ type ComicChaptersTabProps = {
   onMovePageByDirection: (pageId: string, direction: "up" | "down") => void;
   onSave: () => void;
   onResetPages: () => void;
+  onSelectComic: (comicId: string) => void;
 };
 
 export function ComicChaptersTab({
+  catalog,
   selectedComic,
   selectedChapters,
   chapterValues,
@@ -39,6 +42,7 @@ export function ComicChaptersTab({
   onMovePageByDirection,
   onSave,
   onResetPages,
+  onSelectComic,
 }: ComicChaptersTabProps) {
   const chapterInputRef = useRef<HTMLInputElement>(null);
   const [pageDragId, setPageDragId] = useState<string | null>(null);
@@ -72,7 +76,26 @@ export function ComicChaptersTab({
           </button>
         </div>
       </div>
-      <div className="p-5">
+      <div className="p-5 space-y-5">
+        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 px-4 py-3">
+          <BookOpen size={16} className="shrink-0 text-slate-400" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Target comic</div>
+            <select
+              value={selectedComic?.id ?? ""}
+              onChange={(e) => { const v = e.target.value; if (v) onSelectComic(v); }}
+              className="mt-0.5 w-full bg-transparent text-sm font-bold text-slate-900 dark:text-white focus:outline-none"
+            >
+              <option value="">Select a comic...</option>
+              {catalog.map((comic) => (
+                <option key={comic.id} value={comic.id}>
+                  {comic.title} ({comic.status})
+                </option>
+              ))}
+            </select>
+          </div>
+        </label>
+
         <input
           ref={chapterInputRef}
           type="file"
@@ -103,10 +126,9 @@ export function ComicChaptersTab({
                 Add a chapter title, pick page images, then reorder them before upload. Files over 2 MB are blocked.
               </p>
             </div>
-            <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">Selected comic: {selectedComic?.title ?? "None"}</div>
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
             <label className="space-y-2">
               <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Chapter number</div>
               <input
@@ -124,30 +146,6 @@ export function ComicChaptersTab({
                 onChange={(event) => onChapterValuesChange({ ...chapterValues, title: event.target.value })}
                 className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
                 placeholder="Chapter title"
-              />
-            </label>
-            <label className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Status</div>
-              <select
-                value={chapterValues.status}
-                onChange={(event) => onChapterValuesChange({ ...chapterValues, status: event.target.value as ComicStatus })}
-                className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
-              >
-                <option value="draft">Draft</option>
-                <option value="pending">Pending</option>
-                <option value="published">Published</option>
-                <option value="archived">Archived</option>
-              </select>
-            </label>
-            <label className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Scheduled at</div>
-              <input
-                value={formatDateTimeLocalInput(chapterValues.scheduledAt)}
-                onChange={(event) =>
-                  onChapterValuesChange({ ...chapterValues, scheduledAt: parseDateTimeLocalInput(event.target.value) })
-                }
-                type="datetime-local"
-                className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white"
               />
             </label>
           </div>

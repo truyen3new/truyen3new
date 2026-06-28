@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers3 } from "lucide-react";
+import { Layers3, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/modules/auth/AuthContext";
 import { useAutoSave } from "@/hooks/useAutoSave";
@@ -18,9 +18,10 @@ import {
   createComicChapterFromFiles,
   createComicFromMetadata,
   deleteComic,
+  fetchComicCatalog,
   listComicModerationState,
   loadComicCatalog,
-  loadComicDraft,
+
   loadComicRecord,
   proxiedR2ImageUrl,
   recordComicAudit,
@@ -58,12 +59,11 @@ export const ComicManagementTab: React.FC = () => {
   const canModerate = canManageAll || role === "employee";
 
   const [activeTab, setActiveTab] = useState<TabKey>("catalog");
-  const [catalog, setCatalog] = useState<ComicCmsRecord[]>(() => loadComicCatalog());
-  const [selectedComicId, setSelectedComicId] = useState<string | null>(catalog[0]?.id ?? null);
+  const [catalog, setCatalog] = useState<ComicCmsRecord[]>([]);
+  const [selectedComicId, setSelectedComicId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [filters, setFilters] = useState<ComicCatalogFilters>({
     search: "",
-    genre: "",
     status: "all",
     author: "",
   });
@@ -94,6 +94,14 @@ export const ComicManagementTab: React.FC = () => {
   const autoSave = useAutoSave(`comic-cms:${draftKey}`, formValues, 1250);
 
   const selectedChapters = selectedComic?.chapters ?? [];
+
+  useEffect(() => {
+    const cached = loadComicCatalog();
+    if (cached.length > 0) setCatalog(cached);
+    fetchComicCatalog().then(setCatalog).catch(() => {
+      if (cached.length === 0) toast.error("Failed to load comics from server");
+    });
+  }, []);
 
   useEffect(() => {
     if (catalog.length > 0 && !selectedComicId) {
@@ -162,23 +170,27 @@ export const ComicManagementTab: React.FC = () => {
 
   const refreshCatalog = useCallback((showToast = false) => {
     setRefreshing(true);
-    try {
-      const data = loadComicCatalog();
-      setCatalog(data);
-      if (showToast) toast.success("Catalog refreshed");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to refresh catalog");
-    } finally {
-      setRefreshing(false);
-    }
+    fetchComicCatalog()
+      .then((data) => {
+        setCatalog(data);
+        if (showToast) toast.success("Catalog refreshed");
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to refresh catalog");
+      })
+      .finally(() => setRefreshing(false));
   }, []);
 
   const loadNewComicDraft = useCallback(() => {
     setSelectedComicId(null);
-    setFormValues(loadComicDraft("new") ?? DEFAULT_FORM);
+    setFormValues(DEFAULT_FORM);
     setCoverFile(null);
+    setCoverPreview("");
     setFormError(null);
+    setChapterValues(DEFAULT_CHAPTER_FORM);
+    setChapterPages([]);
     setChapterError(null);
+    try { localStorage.removeItem(`autosave_comic-cms:new`); } catch {}
     setActiveTab("editor");
     toast.info("Editing a new comic draft");
   }, []);
@@ -284,7 +296,7 @@ export const ComicManagementTab: React.FC = () => {
           comicId: saved.id,
           status: saved.status,
           title: saved.title,
-          target_user_id: selectedComic.storyId,
+          target_user_id: selectedComic.id,
         });
         applySavedRecord(saved);
         clearComicDraft(selectedComic.id);
@@ -296,7 +308,7 @@ export const ComicManagementTab: React.FC = () => {
           comicId: created.id,
           status: created.status,
           title: created.title,
-          target_user_id: created.storyId,
+          target_user_id: created.id,
         });
         applySavedRecord(created);
         clearComicDraft("new");
@@ -333,7 +345,7 @@ export const ComicManagementTab: React.FC = () => {
           comicId: saved.id,
           status: saved.status,
           title: saved.title,
-          target_user_id: selectedComic.storyId,
+          target_user_id: selectedComic.id,
         });
         applySavedRecord(saved);
         autoSave.clear();
@@ -366,18 +378,17 @@ export const ComicManagementTab: React.FC = () => {
       if (selectedComic) {
         let nextCoverUrl = selectedComic.coverUrl;
         if (coverFile) nextCoverUrl = await uploadComicCover(coverFile);
-        const updated: ComicCmsRecord = {
+      const updated: ComicCmsRecord = {
           ...selectedComic,
-          ...nextState,
+          ...parsed.data,
           coverUrl: nextCoverUrl,
-          lastUpdatedAt: new Date().toISOString(),
-        };
+        } as ComicCmsRecord;
         const saved = await updateComicRecord(updated);
         await recordComicAudit("comic.publish", {
           comicId: saved.id,
           status: saved.status,
           title: saved.title,
-          target_user_id: selectedComic.storyId,
+          target_user_id: selectedComic.id,
         });
         applySavedRecord(saved);
         clearComicDraft(selectedComic.id);
@@ -388,7 +399,7 @@ export const ComicManagementTab: React.FC = () => {
           comicId: created.id,
           status: "published",
           title: created.title,
-          target_user_id: created.storyId,
+          target_user_id: created.id,
         });
         applySavedRecord(created);
         clearComicDraft("new");
@@ -406,12 +417,12 @@ export const ComicManagementTab: React.FC = () => {
     if (!selectedComic || !canManageAll) return;
     setFormBusy(true);
     try {
-      await deleteComic(selectedComic);
+      await deleteComic(selectedComic.id);
       await recordComicAudit("comic.delete", {
         comicId: selectedComic.id,
         status: selectedComic.status,
         title: selectedComic.title,
-        target_user_id: selectedComic.storyId,
+        target_user_id: selectedComic.id,
       });
       clearComicDraft(selectedComic.id);
       autoSave.clear();
@@ -465,7 +476,7 @@ export const ComicManagementTab: React.FC = () => {
         chapterId: chapter.id,
         chapterNumber: parsed.data.chapterNumber,
         title: parsed.data.title,
-        target_user_id: selectedComic.storyId,
+        target_user_id: selectedComic.id,
       });
       clearComicDraft(selectedComic.id);
       autoSave.clear();
@@ -503,7 +514,7 @@ export const ComicManagementTab: React.FC = () => {
           comicId: selectedComic?.id ?? "moderation-queue",
           commentId,
           status: nextStatus,
-          target_user_id: selectedComic?.storyId ?? null,
+          target_user_id: selectedComic?.id ?? null,
         });
       } finally {
         setModerationBusy(false);
@@ -527,7 +538,7 @@ export const ComicManagementTab: React.FC = () => {
         await recordComicAudit("comic.moderation.keywords.update", {
           comicId: selectedComic?.id ?? "moderation-queue",
           keywords: nextState.keywords,
-          target_user_id: selectedComic?.storyId ?? null,
+          target_user_id: selectedComic?.id ?? null,
         });
       } finally {
         setModerationBusy(false);
@@ -548,7 +559,7 @@ export const ComicManagementTab: React.FC = () => {
       await recordComicAudit("comic.moderation.keywords.remove", {
         comicId: selectedComic?.id ?? "moderation-queue",
         keyword,
-        target_user_id: selectedComic?.storyId ?? null,
+        target_user_id: selectedComic?.id ?? null,
       });
     },
     [canModerate, moderation, selectedComic],
@@ -561,7 +572,7 @@ export const ComicManagementTab: React.FC = () => {
       await recordComicAudit("comic.moderation.keywords.update", {
         comicId: selectedComic?.id ?? "moderation-queue",
         keywords: moderation.keywords,
-        target_user_id: selectedComic?.storyId ?? null,
+        target_user_id: selectedComic?.id ?? null,
       });
       toast.success("Profanity filter saved");
     } finally {
@@ -616,7 +627,7 @@ export const ComicManagementTab: React.FC = () => {
       </header>
 
       <div
-        className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 pb-2"
+        className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2"
         role="tablist"
         aria-label="Comic management sections"
       >
@@ -640,6 +651,15 @@ export const ComicManagementTab: React.FC = () => {
             {label}
           </button>
         ))}
+        <div className="ml-auto">
+          <button
+            type="button"
+            onClick={() => { loadNewComicDraft(); setActiveTab("editor"); }}
+            className="inline-flex items-center gap-2 rounded-full bg-cyan-500 px-5 py-3 text-sm font-black text-slate-950 shadow-lg hover:bg-cyan-400 transition-colors"
+          >
+            <Plus size={16} /> Create New Comic
+          </button>
+        </div>
       </div>
 
       {activeTab === "catalog" && (
@@ -675,6 +695,7 @@ export const ComicManagementTab: React.FC = () => {
 
       {activeTab === "chapters" && (
         <ComicChaptersTab
+          catalog={catalog}
           selectedComic={selectedComic}
           selectedChapters={selectedChapters}
           chapterValues={chapterValues}
@@ -688,6 +709,7 @@ export const ComicManagementTab: React.FC = () => {
           onMovePageByDirection={moveChapterPageByDirection}
           onSave={handleChapterSave}
           onResetPages={resetChapterPages}
+          onSelectComic={(comicId) => { setSelectedComicId(comicId); setChapterError(null); }}
         />
       )}
 
